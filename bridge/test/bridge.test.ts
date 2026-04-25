@@ -226,4 +226,43 @@ describe("bridge api", () => {
 
     await app.close()
   })
+
+  it("streams chat events through /chat/stream", async () => {
+    const app = buildServer()
+    await app.ready()
+
+    vi.spyOn(adapterModule.OpenCodeHttpAdapter.prototype, "runChat").mockResolvedValueOnce({
+      success: true,
+      response: "streamed text",
+      model: "test-model",
+      mode: "reactive",
+      workflow_mode: "lightning",
+      used_tools: [],
+      created_paths: [],
+      updated_paths: [],
+      patch_summaries: [],
+    })
+
+    const streamRes = await app.inject({ method: "POST", url: "/chat/stream", payload: { prompt: "hi stream" } })
+    expect(streamRes.statusCode).toBe(200)
+    expect(streamRes.headers["content-type"]).toContain("text/event-stream")
+
+    const payload = streamRes.payload
+    expect(payload).toContain('"type":"start"')
+    expect(payload).toContain('"type":"text_delta"')
+    expect(payload).toContain('"type":"done"')
+    expect(payload).toContain('"type":"eof"')
+
+    await app.close()
+  })
+
+  it("rejects invalid request for /chat/stream", async () => {
+    const app = buildServer()
+    await app.ready()
+
+    const res = await app.inject({ method: "POST", url: "/chat/stream", payload: { prompt: "" } })
+    expect(res.statusCode).toBe(400)
+
+    await app.close()
+  })
 })

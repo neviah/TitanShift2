@@ -113,11 +113,49 @@ export function buildServer() {
       ...parsed.data,
       model_backend: parsed.data.model_backend ?? settings.model_default_backend,
     }
+    const executed = await executeChatTask(payload)
+    if (!executed.ok) {
+      return reply.code(500).send({
+        success: false,
+        response: "",
+        model: "unknown",
+        mode: "error",
+        task_id: executed.taskId,
+        run_id: executed.runId,
+        error: executed.error,
+      })
+    }
+
+    return {
+      ...executed.result,
+      task_id: executed.taskId,
+      run_id: executed.runId,
+    }
+  })
+
+  app.post("/chat/stream", async (req, reply) => {
+    const parsed = ChatRequestSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ success: false, error: "invalid_request", details: parsed.error.issues })
+    }
+
+    const payload: ChatRequest = {
+      ...parsed.data,
+      model_backend: parsed.data.model_backend ?? settings.model_default_backend,
+    }
+
+    reply.raw.setHeader("Content-Type", "text/event-stream")
+    reply.raw.setHeader("Cache-Control", "no-cache")
+    reply.raw.setHeader("Connection", "keep-alive")
+
+    const streamEvent = (event: Record<string, unknown>) => {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+
     const taskId = randomUUID()
     const runId = randomUUID()
     const now = new Date().toISOString()
-
-    const baseTask: TaskRecord = {
+    taskStore.upsert({
       task_id: taskId,
       run_id: runId,
       description: payload.prompt,
@@ -126,8 +164,9 @@ export function buildServer() {
       started_at: now,
       output: {},
       workspace_root: activeWorkspaceRoot,
-    }
-    taskStore.upsert(baseTask)
+    })
+
+    streamEvent({ type: "start", task_id: taskId, run_id: runId, workflow_mode: payload.workflow_mode ?? "lightning" })
 
     try {
       const result = await adapter.runChat({
@@ -148,11 +187,24 @@ export function buildServer() {
         },
       })
 
-      return {
-        ...result,
+      if (result.response) {
+        streamEvent({ type: "text_delta", text: result.response })
+      }
+
+      streamEvent({
+        type: "done",
+        success: result.success,
+        response: result.response,
+        model: result.model,
+        mode: result.mode,
+        workflow_mode: result.workflow_mode,
+        used_tools: result.used_tools ?? [],
+        created_paths: result.created_paths ?? [],
+        updated_paths: result.updated_paths ?? [],
+        patch_summaries: result.patch_summaries ?? [],
         task_id: taskId,
         run_id: runId,
-      }
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown_error"
       taskStore.updateStatus(taskId, "failed", {
@@ -161,16 +213,14 @@ export function buildServer() {
         error: message,
         output: { error: message },
       })
-      return reply.code(500).send({
-        success: false,
-        response: "",
-        model: "unknown",
-        mode: "error",
-        task_id: taskId,
-        run_id: runId,
-        error: message,
-      })
+
+      streamEvent({ type: "error", error: message, task_id: taskId, run_id: runId })
+    } finally {
+      streamEvent({ type: "eof", task_id: taskId, run_id: runId })
+      reply.raw.end()
     }
+
+    return reply
   })
 
   app.get("/tasks", async () => taskStore.list())
@@ -457,6 +507,55 @@ export function buildServer() {
     })
 
     return { task_id: taskId, run_id: runId }
+  }
+
+  async function executeChatTask(payload: ChatRequest) {
+    const taskId = randomUUID()
+    const runId = randomUUID()
+    const now = new Date().toISOString()
+
+    const baseTask: TaskRecord = {
+      task_id: taskId,
+      run_id: runId,
+      description: payload.prompt,
+      status: "running",
+      created_at: now,
+      started_at: now,
+      output: {},
+      workspace_root: activeWorkspaceRoot,
+    }
+    taskStore.upsert(baseTask)
+
+    try {
+      const result = await adapter.runChat({
+        taskId,
+        runId,
+        workspaceRoot: activeWorkspaceRoot,
+        payload,
+      })
+
+      taskStore.updateStatus(taskId, "completed", {
+        completed_at: new Date().toISOString(),
+        success: result.success,
+        error: result.error,
+        output: {
+          ...result,
+          session_id: result.session_id,
+          provider_model: settings.provider_default_model,
+        },
+      })
+
+      return { ok: true as const, result, taskId, runId }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown_error"
+      taskStore.updateStatus(taskId, "failed", {
+        completed_at: new Date().toISOString(),
+        success: false,
+        error: message,
+        output: { error: message },
+      })
+      return { ok: false as const, error: message, taskId, runId }
+    }
   }
 
   async function runScheduledTemplateJob(job: SchedulerTemplateJob) {

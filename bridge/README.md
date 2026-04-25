@@ -6,6 +6,7 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 
 - Phase 1 foundation bootstrapped.
 - Chat + Task create/status/cancel endpoints implemented.
+- Chat streaming endpoint implemented with TitanShift-style SSE events.
 - Workspace root switching implemented and enforced on adapter calls.
 - Scheduler create/list/run/delete and tick endpoints implemented.
 - TitanShift-compatible scheduler template-jobs and task-stacks endpoints implemented.
@@ -30,6 +31,7 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 
 - GET /health
 - POST /chat
+- POST /chat/stream
 - GET /tasks
 - GET /tasks/:task_id
 - POST /tasks/:task_id/cancel
@@ -58,3 +60,13 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 - Blocks successful file-mutation runs when no side-effect evidence exists.
 - Assigns task_id and run_id for every chat execution.
 - Tracks workspace_root per task and uses it in OpenCode calls.
+
+## Streaming events
+
+`/chat/stream` emits `data: {json}\n\n` SSE frames with event types:
+
+- `start`
+- `text_delta`
+- `done`
+- `error`
+- `eof`
