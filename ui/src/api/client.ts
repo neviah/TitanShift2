@@ -1,8 +1,11 @@
 import type {
   ChatResponse,
+  ConfigProvidersResponse,
   SchedulerJob,
   SchedulerTaskStackJob,
+  SchedulerTickResponse,
   SchedulerTemplateJob,
+  StreamEvent,
   TaskSummary,
 } from "./types"
 
@@ -28,7 +31,7 @@ export function sendChat(prompt: string): Promise<ChatResponse> {
 
 export function streamChat(
   prompt: string,
-  onEvent: (event: Record<string, unknown>) => void,
+  onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
   return fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
@@ -53,7 +56,7 @@ export function streamChat(
       for (const chunk of chunks) {
         const line = chunk.split("\n").find((x) => x.startsWith("data: "))
         if (!line) continue
-        const payload = JSON.parse(line.slice(6)) as Record<string, unknown>
+        const payload = JSON.parse(line.slice(6)) as StreamEvent
         onEvent(payload)
       }
     }
@@ -80,6 +83,10 @@ export function fetchConfig(): Promise<Record<string, unknown>> {
   return request("/config")
 }
 
+export function fetchConfigProviders(): Promise<ConfigProvidersResponse> {
+  return request("/config/providers")
+}
+
 export function updateConfig(key: string, value: unknown): Promise<{ ok: boolean }> {
   return request("/config", { method: "POST", body: JSON.stringify({ key, value }) })
 }
@@ -100,6 +107,17 @@ export function createSchedulerJob(prompt: string): Promise<{ job_id: string }> 
   })
 }
 
+export function deleteSchedulerJob(jobId: string): Promise<{ deleted: boolean }> {
+  return request(`/scheduler/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" })
+}
+
+export function setSchedulerJobEnabled(jobId: string, enabled: boolean): Promise<{ enabled: boolean }> {
+  return request(`/scheduler/jobs/${encodeURIComponent(jobId)}/enabled`, {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  })
+}
+
 export function fetchSchedulerTemplateJobs(): Promise<SchedulerTemplateJob[]> {
   return request("/scheduler/template-jobs")
 }
@@ -112,6 +130,17 @@ export function createSchedulerTemplateJob(templateId: string): Promise<{ job_id
       schedule_type: "interval",
       interval_seconds: 60,
     }),
+  })
+}
+
+export function deleteSchedulerTemplateJob(jobId: string): Promise<{ deleted: boolean }> {
+  return request(`/scheduler/template-jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" })
+}
+
+export function setSchedulerTemplateJobEnabled(jobId: string, enabled: boolean): Promise<{ enabled: boolean }> {
+  return request(`/scheduler/template-jobs/${encodeURIComponent(jobId)}/enabled`, {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
   })
 }
 
@@ -128,4 +157,19 @@ export function createSchedulerTaskStack(taskIds: string[]): Promise<{ job_id: s
       interval_seconds: 60,
     }),
   })
+}
+
+export function deleteSchedulerTaskStack(jobId: string): Promise<{ deleted: boolean }> {
+  return request(`/scheduler/task-stacks/${encodeURIComponent(jobId)}`, { method: "DELETE" })
+}
+
+export function setSchedulerTaskStackEnabled(jobId: string, enabled: boolean): Promise<{ enabled: boolean }> {
+  return request(`/scheduler/task-stacks/${encodeURIComponent(jobId)}/enabled`, {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+export function triggerSchedulerTick(): Promise<SchedulerTickResponse> {
+  return request("/scheduler/tick", { method: "POST", body: JSON.stringify({}) })
 }

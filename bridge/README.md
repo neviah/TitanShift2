@@ -66,9 +66,11 @@ Run it with:
 - GET /scheduler/template-jobs
 - POST /scheduler/template-jobs
 - DELETE /scheduler/template-jobs/:job_id
+- POST /scheduler/template-jobs/:job_id/enabled
 - GET /scheduler/task-stacks
 - POST /scheduler/task-stacks
 - DELETE /scheduler/task-stacks/:job_id
+- POST /scheduler/task-stacks/:job_id/enabled
 - POST /scheduler/tick
 
 ## Reliability controls

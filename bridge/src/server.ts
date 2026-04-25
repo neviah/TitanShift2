@@ -406,6 +406,22 @@ export function buildServer() {
     return { ok: true, job_id: req.params.job_id, deleted }
   })
 
+  app.post<{ Params: { job_id: string } }>("/scheduler/template-jobs/:job_id/enabled", async (req, reply) => {
+    const parsed = SchedulerEnabledSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ ok: false, error: "invalid_enabled_state" })
+    }
+
+    const row = schedulerTemplateJobs.get(req.params.job_id)
+    if (!row) {
+      return reply.code(404).send({ ok: false, error: "job_not_found" })
+    }
+
+    const next = { ...row, enabled: parsed.data.enabled }
+    schedulerTemplateJobs.set(req.params.job_id, next)
+    return { job_id: next.job_id, enabled: next.enabled }
+  })
+
   app.get("/scheduler/task-stacks", async () => {
     return [...schedulerTaskStacks.values()].sort((a, b) => a.job_id.localeCompare(b.job_id))
   })
@@ -439,6 +455,22 @@ export function buildServer() {
   app.delete<{ Params: { job_id: string } }>("/scheduler/task-stacks/:job_id", async (req) => {
     const deleted = schedulerTaskStacks.delete(req.params.job_id)
     return { ok: true, job_id: req.params.job_id, deleted }
+  })
+
+  app.post<{ Params: { job_id: string } }>("/scheduler/task-stacks/:job_id/enabled", async (req, reply) => {
+    const parsed = SchedulerEnabledSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ ok: false, error: "invalid_enabled_state" })
+    }
+
+    const row = schedulerTaskStacks.get(req.params.job_id)
+    if (!row) {
+      return reply.code(404).send({ ok: false, error: "job_not_found" })
+    }
+
+    const next = { ...row, enabled: parsed.data.enabled }
+    schedulerTaskStacks.set(req.params.job_id, next)
+    return { job_id: next.job_id, enabled: next.enabled }
   })
 
   app.post<{ Params: { job_id: string } }>("/scheduler/jobs/:job_id/enabled", async (req, reply) => {
@@ -642,6 +674,7 @@ export function buildServer() {
       job_id: job.job_id,
       task_prompt: `Run template ${job.template_id}`,
       workflow_mode: "lightning",
+      timeout_s: job.timeout_s,
     })
   }
 
@@ -652,6 +685,7 @@ export function buildServer() {
       task_prompt: prompt,
       model_backend: job.model_backend,
       workflow_mode: job.workflow_mode,
+      timeout_s: job.timeout_s,
     })
   }
 

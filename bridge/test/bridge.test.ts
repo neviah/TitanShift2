@@ -188,6 +188,14 @@ describe("bridge api", () => {
     expect(rows.length).toBe(1)
     expect(rows[0].template_id).toBe("tmpl-1")
 
+    const toggled = await app.inject({
+      method: "POST",
+      url: `/scheduler/template-jobs/${createdBody.job_id}/enabled`,
+      payload: { enabled: false },
+    })
+    expect(toggled.statusCode).toBe(200)
+    expect(toggled.json().enabled).toBe(false)
+
     const deleted = await app.inject({ method: "DELETE", url: `/scheduler/template-jobs/${createdBody.job_id}` })
     expect(deleted.statusCode).toBe(200)
     expect(deleted.json().deleted).toBe(true)
@@ -219,6 +227,14 @@ describe("bridge api", () => {
     const rows = listed.json()
     expect(rows.length).toBe(1)
     expect(rows[0].task_ids.length).toBe(2)
+
+    const toggled = await app.inject({
+      method: "POST",
+      url: `/scheduler/task-stacks/${createdBody.job_id}/enabled`,
+      payload: { enabled: false },
+    })
+    expect(toggled.statusCode).toBe(200)
+    expect(toggled.json().enabled).toBe(false)
 
     const deleted = await app.inject({ method: "DELETE", url: `/scheduler/task-stacks/${createdBody.job_id}` })
     expect(deleted.statusCode).toBe(200)

@@ -8,6 +8,11 @@ export type ChatResponse = {
   run_id?: string
 }
 
+export type StreamEvent = {
+  type: string
+  [key: string]: unknown
+}
+
 export type TaskSummary = {
   task_id: string
   run_id: string
@@ -41,4 +46,17 @@ export type SchedulerTaskStackJob = {
   description: string
   schedule_type: "interval" | "cron"
   enabled: boolean
+}
+
+export type ConfigProvidersResponse = {
+  providers: Array<{ id: string; name: string }>
+  default: Record<string, string>
+}
+
+export type SchedulerTickResponse = {
+  ran_jobs: string[]
+  failed_jobs: string[]
+  timed_out_jobs: string[]
+  auto_disabled_jobs: string[]
+  job_count: number
 }
