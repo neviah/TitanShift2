@@ -22,6 +22,21 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 3. Run tests:
    npm test
 
+## UI shell (initial port)
+
+A minimal bridge-driven UI shell exists in [ui/src/App.tsx](../ui/src/App.tsx) for the 5 core workflows:
+
+- Chat
+- Tasks
+- Workspaces
+- Scheduler
+- Settings
+
+Run it with:
+
+1. `npm --prefix ui install`
+2. `npm --prefix ui dev`
+
 ## Environment
 
 - OPENCODE_BASE_URL: OpenCode server base URL. Default: http://127.0.0.1:4096

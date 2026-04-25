@@ -1,6 +1,8 @@
 # Bridge build artifacts
 bridge/node_modules/
 bridge/dist/
+ui/node_modules/
+ui/dist/
 
 # Local editor/runtime artifacts
 .vscode/
