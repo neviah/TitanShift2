@@ -8,6 +8,7 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 - Chat + Task create/status/cancel endpoints implemented.
 - Workspace root switching implemented and enforced on adapter calls.
 - Scheduler create/list/run/delete and tick endpoints implemented.
+- TitanShift-compatible scheduler template-jobs and task-stacks endpoints implemented.
 - Settings flow for model/provider defaults implemented.
 - Reliability guardrails added at adapter execution boundary.
 
@@ -42,6 +43,12 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 - DELETE /scheduler/jobs/:job_id
 - POST /scheduler/jobs/:job_id/enabled
 - POST /scheduler/jobs/:job_id/run
+- GET /scheduler/template-jobs
+- POST /scheduler/template-jobs
+- DELETE /scheduler/template-jobs/:job_id
+- GET /scheduler/task-stacks
+- POST /scheduler/task-stacks
+- DELETE /scheduler/task-stacks/:job_id
 - POST /scheduler/tick
 
 ## Reliability controls

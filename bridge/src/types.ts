@@ -67,6 +67,37 @@ export type SchedulerJob = {
   last_task_id?: string
 }
 
+export type SchedulerTemplateJob = {
+  job_id: string
+  template_id: string
+  description: string
+  schedule_type: "interval" | "cron"
+  interval_seconds?: number
+  cron?: string
+  enabled: boolean
+  timeout_s?: number
+  max_failures: number
+}
+
+export type SchedulerTaskStackJob = {
+  job_id: string
+  task_ids: string[]
+  description: string
+  schedule_type: "interval" | "cron"
+  interval_seconds?: number
+  cron?: string
+  enabled: boolean
+  timeout_s?: number
+  max_failures: number
+  model_backend?: string
+  workflow_mode?: WorkflowMode
+  budget?: {
+    max_steps?: number
+    max_tokens?: number
+    max_duration_ms?: number
+  }
+}
+
 export type SchedulerTickResult = {
   ran_jobs: string[]
   failed_jobs: string[]

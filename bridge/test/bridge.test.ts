@@ -162,4 +162,68 @@ describe("bridge api", () => {
 
     await app.close()
   })
+
+  it("supports scheduler template-jobs create/list/delete", async () => {
+    const app = buildServer()
+    await app.ready()
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/scheduler/template-jobs",
+      payload: {
+        template_id: "tmpl-1",
+        schedule_type: "interval",
+        interval_seconds: 300,
+      },
+    })
+
+    expect(created.statusCode).toBe(200)
+    const createdBody = created.json()
+    expect(createdBody.ok).toBe(true)
+    expect(createdBody.template_id).toBe("tmpl-1")
+
+    const listed = await app.inject({ method: "GET", url: "/scheduler/template-jobs" })
+    expect(listed.statusCode).toBe(200)
+    const rows = listed.json()
+    expect(rows.length).toBe(1)
+    expect(rows[0].template_id).toBe("tmpl-1")
+
+    const deleted = await app.inject({ method: "DELETE", url: `/scheduler/template-jobs/${createdBody.job_id}` })
+    expect(deleted.statusCode).toBe(200)
+    expect(deleted.json().deleted).toBe(true)
+
+    await app.close()
+  })
+
+  it("supports scheduler task-stacks create/list/delete", async () => {
+    const app = buildServer()
+    await app.ready()
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/scheduler/task-stacks",
+      payload: {
+        task_ids: ["task-1", "task-2"],
+        schedule_type: "cron",
+        cron: "*/5 * * * *",
+      },
+    })
+
+    expect(created.statusCode).toBe(200)
+    const createdBody = created.json()
+    expect(createdBody.ok).toBe(true)
+    expect(createdBody.task_count).toBe(2)
+
+    const listed = await app.inject({ method: "GET", url: "/scheduler/task-stacks" })
+    expect(listed.statusCode).toBe(200)
+    const rows = listed.json()
+    expect(rows.length).toBe(1)
+    expect(rows[0].task_ids.length).toBe(2)
+
+    const deleted = await app.inject({ method: "DELETE", url: `/scheduler/task-stacks/${createdBody.job_id}` })
+    expect(deleted.statusCode).toBe(200)
+    expect(deleted.json().deleted).toBe(true)
+
+    await app.close()
+  })
 })

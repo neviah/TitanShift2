@@ -4,7 +4,14 @@ import { z } from "zod"
 import { OpenCodeHttpAdapter } from "./adapters/opencodeAdapter.js"
 import { TaskStore } from "./store/taskStore.js"
 import { SchedulerStore } from "./store/schedulerStore.js"
-import type { ChatRequest, RuntimeSettings, SchedulerTickResult, TaskRecord } from "./types.js"
+import type {
+  ChatRequest,
+  RuntimeSettings,
+  SchedulerTaskStackJob,
+  SchedulerTemplateJob,
+  SchedulerTickResult,
+  TaskRecord,
+} from "./types.js"
 
 const ChatRequestSchema = z.object({
   prompt: z.string().min(1),
@@ -46,10 +53,45 @@ const SchedulerEnabledSchema = z.object({
   enabled: z.boolean(),
 })
 
+const SchedulerTemplateJobCreateSchema = z.object({
+  template_id: z.string().min(1),
+  job_id: z.string().optional(),
+  description: z.string().optional(),
+  schedule_type: z.enum(["interval", "cron"]),
+  interval_seconds: z.number().int().positive().optional(),
+  cron: z.string().optional(),
+  enabled: z.boolean().optional(),
+  timeout_s: z.number().positive().optional(),
+  max_failures: z.number().int().nonnegative().optional(),
+})
+
+const SchedulerTaskStackCreateSchema = z.object({
+  task_ids: z.array(z.string().min(1)).min(1),
+  job_id: z.string().optional(),
+  description: z.string().optional(),
+  schedule_type: z.enum(["interval", "cron"]),
+  interval_seconds: z.number().int().positive().optional(),
+  cron: z.string().optional(),
+  enabled: z.boolean().optional(),
+  timeout_s: z.number().positive().optional(),
+  max_failures: z.number().int().nonnegative().optional(),
+  model_backend: z.string().optional(),
+  workflow_mode: z.enum(["lightning", "superpowered"]).optional(),
+  budget: z
+    .object({
+      max_steps: z.number().int().positive().optional(),
+      max_tokens: z.number().int().positive().optional(),
+      max_duration_ms: z.number().int().positive().optional(),
+    })
+    .optional(),
+})
+
 export function buildServer() {
   const app = Fastify({ logger: true })
   const taskStore = new TaskStore()
   const schedulerStore = new SchedulerStore()
+  const schedulerTemplateJobs = new Map<string, SchedulerTemplateJob>()
+  const schedulerTaskStacks = new Map<string, SchedulerTaskStackJob>()
 
   let activeWorkspaceRoot = process.cwd()
   let settings: RuntimeSettings = {
@@ -231,6 +273,73 @@ export function buildServer() {
     return { ok: true, job_id: req.params.job_id, deleted }
   })
 
+  app.get("/scheduler/template-jobs", async () => {
+    return [...schedulerTemplateJobs.values()].sort((a, b) => a.job_id.localeCompare(b.job_id))
+  })
+
+  app.post("/scheduler/template-jobs", async (req, reply) => {
+    const parsed = SchedulerTemplateJobCreateSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ ok: false, error: "invalid_template_job", details: parsed.error.issues })
+    }
+
+    const body = parsed.data
+    const jobId = body.job_id ?? randomUUID()
+    schedulerTemplateJobs.set(jobId, {
+      job_id: jobId,
+      template_id: body.template_id,
+      description: body.description ?? `Template ${body.template_id}`,
+      schedule_type: body.schedule_type,
+      interval_seconds: body.interval_seconds,
+      cron: body.cron,
+      enabled: body.enabled ?? true,
+      timeout_s: body.timeout_s,
+      max_failures: body.max_failures ?? 3,
+    })
+
+    return { ok: true, job_id: jobId, template_id: body.template_id }
+  })
+
+  app.delete<{ Params: { job_id: string } }>("/scheduler/template-jobs/:job_id", async (req) => {
+    const deleted = schedulerTemplateJobs.delete(req.params.job_id)
+    return { ok: true, job_id: req.params.job_id, deleted }
+  })
+
+  app.get("/scheduler/task-stacks", async () => {
+    return [...schedulerTaskStacks.values()].sort((a, b) => a.job_id.localeCompare(b.job_id))
+  })
+
+  app.post("/scheduler/task-stacks", async (req, reply) => {
+    const parsed = SchedulerTaskStackCreateSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ ok: false, error: "invalid_task_stack", details: parsed.error.issues })
+    }
+
+    const body = parsed.data
+    const jobId = body.job_id ?? randomUUID()
+    schedulerTaskStacks.set(jobId, {
+      job_id: jobId,
+      task_ids: body.task_ids,
+      description: body.description ?? `Task stack ${body.task_ids.length} tasks`,
+      schedule_type: body.schedule_type,
+      interval_seconds: body.interval_seconds,
+      cron: body.cron,
+      enabled: body.enabled ?? true,
+      timeout_s: body.timeout_s,
+      max_failures: body.max_failures ?? 3,
+      model_backend: body.model_backend,
+      workflow_mode: body.workflow_mode,
+      budget: body.budget,
+    })
+
+    return { ok: true, job_id: jobId, task_count: body.task_ids.length }
+  })
+
+  app.delete<{ Params: { job_id: string } }>("/scheduler/task-stacks/:job_id", async (req) => {
+    const deleted = schedulerTaskStacks.delete(req.params.job_id)
+    return { ok: true, job_id: req.params.job_id, deleted }
+  })
+
   app.post<{ Params: { job_id: string } }>("/scheduler/jobs/:job_id/enabled", async (req, reply) => {
     const parsed = SchedulerEnabledSchema.safeParse(req.body)
     if (!parsed.success) {
@@ -261,13 +370,33 @@ export function buildServer() {
       failed_jobs: [],
       timed_out_jobs: [],
       auto_disabled_jobs: [],
-      job_count: schedulerStore.list().length,
+      job_count: schedulerStore.list().length + schedulerTemplateJobs.size + schedulerTaskStacks.size,
     }
 
     for (const job of schedulerStore.list()) {
       if (!job.enabled) continue
       try {
         await runScheduledJob(job)
+        result.ran_jobs.push(job.job_id)
+      } catch {
+        result.failed_jobs.push(job.job_id)
+      }
+    }
+
+    for (const job of schedulerTemplateJobs.values()) {
+      if (!job.enabled) continue
+      try {
+        await runScheduledTemplateJob(job)
+        result.ran_jobs.push(job.job_id)
+      } catch {
+        result.failed_jobs.push(job.job_id)
+      }
+    }
+
+    for (const job of schedulerTaskStacks.values()) {
+      if (!job.enabled) continue
+      try {
+        await runScheduledTaskStack(job)
         result.ran_jobs.push(job.job_id)
       } catch {
         result.failed_jobs.push(job.job_id)
@@ -328,6 +457,24 @@ export function buildServer() {
     })
 
     return { task_id: taskId, run_id: runId }
+  }
+
+  async function runScheduledTemplateJob(job: SchedulerTemplateJob) {
+    return runScheduledJob({
+      job_id: job.job_id,
+      task_prompt: `Run template ${job.template_id}`,
+      workflow_mode: "lightning",
+    })
+  }
+
+  async function runScheduledTaskStack(job: SchedulerTaskStackJob) {
+    const prompt = `Run task stack: ${job.task_ids.join(", ")}`
+    return runScheduledJob({
+      job_id: job.job_id,
+      task_prompt: prompt,
+      model_backend: job.model_backend,
+      workflow_mode: job.workflow_mode,
+    })
   }
 
   return app
