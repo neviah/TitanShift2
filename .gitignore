@@ -1,0 +1,10 @@
+# Bridge build artifacts
+bridge/node_modules/
+bridge/dist/
+
+# Local editor/runtime artifacts
+.vscode/
+*.log
+
+# Upstream mirror clone (do not commit)
+opencode-upstream/
