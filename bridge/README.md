@@ -66,6 +66,13 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 - Enforces optional timeout for chat flows via `budget.max_duration_ms`.
 - Exposes run status introspection through `/runs` endpoints.
 
+## Deterministic smoke checks
+
+- `test/reliability-filewrite.test.ts` validates file-write reliability guards:
+   - fails if mutation tools are reported but no paths are provided
+   - fails if paths are reported but files do not exist
+   - passes only when filesystem side effects are verifiably present
+
 ## Streaming events
 
 `/chat/stream` emits `data: {json}\n\n` SSE frames with event types:
