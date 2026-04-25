@@ -35,6 +35,9 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 - GET /tasks
 - GET /tasks/:task_id
 - POST /tasks/:task_id/cancel
+- POST /runs
+- GET /runs
+- GET /runs/:run_id
 - GET /workspace/info
 - POST /workspace/set-root
 - GET /config
@@ -60,6 +63,8 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 - Blocks successful file-mutation runs when no side-effect evidence exists.
 - Assigns task_id and run_id for every chat execution.
 - Tracks workspace_root per task and uses it in OpenCode calls.
+- Enforces optional timeout for chat flows via `budget.max_duration_ms`.
+- Exposes run status introspection through `/runs` endpoints.
 
 ## Streaming events
 

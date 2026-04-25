@@ -15,6 +15,13 @@ export class TaskStore {
     return this.tasks.get(taskId)
   }
 
+  getByRunId(runId: string): TaskRecord | undefined {
+    for (const task of this.tasks.values()) {
+      if (task.run_id === runId) return task
+    }
+    return undefined
+  }
+
   updateStatus(taskId: string, status: TaskStatus, patch?: Partial<TaskRecord>): TaskRecord | undefined {
     const task = this.tasks.get(taskId)
     if (!task) return undefined

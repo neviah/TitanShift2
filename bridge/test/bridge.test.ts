@@ -265,4 +265,61 @@ describe("bridge api", () => {
 
     await app.close()
   })
+
+  it("marks chat as failed when max_duration_ms timeout is exceeded", async () => {
+    const app = buildServer()
+    await app.ready()
+
+    vi.spyOn(adapterModule.OpenCodeHttpAdapter.prototype, "runChat").mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({ success: true, response: "late", model: "m", mode: "reactive" })
+          }, 30)
+        }),
+    )
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/chat",
+      payload: { prompt: "timeout test", budget: { max_duration_ms: 1 } },
+    })
+
+    expect(res.statusCode).toBe(500)
+    expect(res.json().error).toBe("timeout_exceeded")
+
+    await app.close()
+  })
+
+  it("supports /runs and /runs/:run_id introspection", async () => {
+    const app = buildServer()
+    await app.ready()
+
+    vi.spyOn(adapterModule.OpenCodeHttpAdapter.prototype, "runChat").mockResolvedValueOnce({
+      success: true,
+      response: "run response",
+      model: "m",
+      mode: "reactive",
+    })
+
+    const created = await app.inject({ method: "POST", url: "/runs", payload: { prompt: "run me" } })
+    expect(created.statusCode).toBe(200)
+    const createdBody = created.json()
+    expect(createdBody.ok).toBe(true)
+    expect(createdBody.run_id).toBeTruthy()
+
+    const list = await app.inject({ method: "GET", url: "/runs" })
+    expect(list.statusCode).toBe(200)
+    const listBody = list.json()
+    expect(listBody.length).toBeGreaterThan(0)
+    expect(listBody[0].run_id).toBeTruthy()
+
+    const detail = await app.inject({ method: "GET", url: `/runs/${createdBody.run_id}` })
+    expect(detail.statusCode).toBe(200)
+    const detailBody = detail.json()
+    expect(detailBody.run_id).toBe(createdBody.run_id)
+    expect(detailBody.status).toBe("completed")
+
+    await app.close()
+  })
 })

@@ -133,6 +133,54 @@ export function buildServer() {
     }
   })
 
+  app.post("/runs", async (req, reply) => {
+    const parsed = ChatRequestSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.code(400).send({ ok: false, error: "invalid_request", details: parsed.error.issues })
+    }
+
+    const payload: ChatRequest = {
+      ...parsed.data,
+      model_backend: parsed.data.model_backend ?? settings.model_default_backend,
+    }
+
+    const executed = await executeChatTask(payload)
+    return {
+      ok: executed.ok,
+      run_id: executed.runId,
+      task_id: executed.taskId,
+      status: executed.ok ? "completed" : "failed",
+      error: executed.ok ? null : executed.error,
+    }
+  })
+
+  app.get("/runs", async () => {
+    return taskStore.list().map((task) => ({
+      run_id: task.run_id,
+      task_id: task.task_id,
+      status: task.status,
+      created_at: task.created_at,
+      completed_at: task.completed_at ?? null,
+      success: task.success ?? null,
+      error: task.error ?? null,
+    }))
+  })
+
+  app.get<{ Params: { run_id: string } }>("/runs/:run_id", async (req, reply) => {
+    const task = taskStore.getByRunId(req.params.run_id)
+    if (!task) {
+      return reply.code(404).send({ detail: "Run not found" })
+    }
+    return {
+      run_id: task.run_id,
+      task_id: task.task_id,
+      status: task.status,
+      output: task.output,
+      error: task.error ?? null,
+      success: task.success ?? null,
+    }
+  })
+
   app.post("/chat/stream", async (req, reply) => {
     const parsed = ChatRequestSchema.safeParse(req.body)
     if (!parsed.success) {
@@ -169,12 +217,15 @@ export function buildServer() {
     streamEvent({ type: "start", task_id: taskId, run_id: runId, workflow_mode: payload.workflow_mode ?? "lightning" })
 
     try {
-      const result = await adapter.runChat({
-        taskId,
-        runId,
-        workspaceRoot: activeWorkspaceRoot,
-        payload,
-      })
+      const result = await withTimeout(
+        adapter.runChat({
+          taskId,
+          runId,
+          workspaceRoot: activeWorkspaceRoot,
+          payload,
+        }),
+        payload.budget?.max_duration_ms,
+      )
 
       taskStore.updateStatus(taskId, "completed", {
         completed_at: new Date().toISOString(),
@@ -461,6 +512,7 @@ export function buildServer() {
     task_prompt: string
     model_backend?: string
     workflow_mode?: "lightning" | "superpowered"
+    timeout_s?: number
   }) {
     const taskId = randomUUID()
     const runId = randomUUID()
@@ -482,12 +534,15 @@ export function buildServer() {
       workflow_mode: job.workflow_mode ?? "lightning",
     }
 
-    const adapterResult = await adapter.runChat({
-      taskId,
-      runId,
-      workspaceRoot: activeWorkspaceRoot,
-      payload,
-    })
+    const adapterResult = await withTimeout(
+      adapter.runChat({
+        taskId,
+        runId,
+        workspaceRoot: activeWorkspaceRoot,
+        payload,
+      }),
+      jobTimeoutMs(job),
+    )
 
     taskStore.updateStatus(taskId, "completed", {
       completed_at: new Date().toISOString(),
@@ -527,12 +582,15 @@ export function buildServer() {
     taskStore.upsert(baseTask)
 
     try {
-      const result = await adapter.runChat({
-        taskId,
-        runId,
-        workspaceRoot: activeWorkspaceRoot,
-        payload,
-      })
+      const result = await withTimeout(
+        adapter.runChat({
+          taskId,
+          runId,
+          workspaceRoot: activeWorkspaceRoot,
+          payload,
+        }),
+        payload.budget?.max_duration_ms,
+      )
 
       taskStore.updateStatus(taskId, "completed", {
         completed_at: new Date().toISOString(),
@@ -555,6 +613,27 @@ export function buildServer() {
         output: { error: message },
       })
       return { ok: false as const, error: message, taskId, runId }
+    }
+  }
+
+  function jobTimeoutMs(job: { timeout_s?: number }): number | undefined {
+    if (typeof job.timeout_s !== "number") return undefined
+    if (!Number.isFinite(job.timeout_s) || job.timeout_s <= 0) return undefined
+    return Math.floor(job.timeout_s * 1000)
+  }
+
+  async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
+    if (!timeoutMs || timeoutMs <= 0) return promise
+
+    let timer: NodeJS.Timeout | undefined
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout_exceeded")), timeoutMs)
+    })
+
+    try {
+      return await Promise.race([promise, timeoutPromise])
+    } finally {
+      if (timer) clearTimeout(timer)
     }
   }
 
