@@ -3,6 +3,7 @@ bridge/node_modules/
 bridge/dist/
 ui/node_modules/
 ui/dist/
+ui/*.tsbuildinfo
 
 # Local editor/runtime artifacts
 .vscode/
