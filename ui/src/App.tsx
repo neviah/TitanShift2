@@ -16,6 +16,9 @@ import {
   fetchSchedulerTemplateJobs,
   fetchTasks,
   fetchWorkspaceInfo,
+  runSchedulerJob,
+  runSchedulerTaskStack,
+  runSchedulerTemplateJob,
   sendChat,
   setSchedulerJobEnabled,
   setSchedulerTaskStackEnabled,
@@ -135,6 +138,12 @@ export function App() {
     const detail = await fetchRun(runId)
     setActiveRunId(runId)
     setSelectedRun(detail)
+  }
+
+  async function runAndInspect(runTrigger: Promise<{ run_id: string; task_id: string }>) {
+    const started = await runTrigger
+    await refreshAll()
+    await inspectRun(started.run_id)
   }
 
   async function handleTick() {
@@ -326,6 +335,9 @@ export function App() {
                       <button onClick={() => void setSchedulerJobEnabled(job.job_id, !job.enabled).then(refreshAll)}>
                         {job.enabled ? "Disable" : "Enable"}
                       </button>
+                      <button className="primary" onClick={() => void runAndInspect(runSchedulerJob(job.job_id))}>
+                        Run
+                      </button>
                       <button className="warn" onClick={() => void deleteSchedulerJob(job.job_id).then(refreshAll)}>
                         Delete
                       </button>
@@ -343,6 +355,9 @@ export function App() {
                       <button onClick={() => void setSchedulerTemplateJobEnabled(job.job_id, !job.enabled).then(refreshAll)}>
                         {job.enabled ? "Disable" : "Enable"}
                       </button>
+                      <button className="primary" onClick={() => void runAndInspect(runSchedulerTemplateJob(job.job_id))}>
+                        Run
+                      </button>
                       <button className="warn" onClick={() => void deleteSchedulerTemplateJob(job.job_id).then(refreshAll)}>
                         Delete
                       </button>
@@ -359,6 +374,9 @@ export function App() {
                     <div className="row">
                       <button onClick={() => void setSchedulerTaskStackEnabled(job.job_id, !job.enabled).then(refreshAll)}>
                         {job.enabled ? "Disable" : "Enable"}
+                      </button>
+                      <button className="primary" onClick={() => void runAndInspect(runSchedulerTaskStack(job.job_id))}>
+                        Run
                       </button>
                       <button className="warn" onClick={() => void deleteSchedulerTaskStack(job.job_id).then(refreshAll)}>
                         Delete

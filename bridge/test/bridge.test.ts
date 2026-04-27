@@ -163,9 +163,16 @@ describe("bridge api", () => {
     await app.close()
   })
 
-  it("supports scheduler template-jobs create/list/delete", async () => {
+  it("supports scheduler template-jobs create/list/run/delete", async () => {
     const app = buildServer()
     await app.ready()
+
+    vi.spyOn(adapterModule.OpenCodeHttpAdapter.prototype, "runChat").mockResolvedValue({
+      success: true,
+      response: "template-run",
+      model: "m",
+      mode: "reactive",
+    })
 
     const created = await app.inject({
       method: "POST",
@@ -196,6 +203,10 @@ describe("bridge api", () => {
     expect(toggled.statusCode).toBe(200)
     expect(toggled.json().enabled).toBe(false)
 
+    const run = await app.inject({ method: "POST", url: `/scheduler/template-jobs/${createdBody.job_id}/run` })
+    expect(run.statusCode).toBe(200)
+    expect(run.json().run_id).toBeTruthy()
+
     const deleted = await app.inject({ method: "DELETE", url: `/scheduler/template-jobs/${createdBody.job_id}` })
     expect(deleted.statusCode).toBe(200)
     expect(deleted.json().deleted).toBe(true)
@@ -203,9 +214,16 @@ describe("bridge api", () => {
     await app.close()
   })
 
-  it("supports scheduler task-stacks create/list/delete", async () => {
+  it("supports scheduler task-stacks create/list/run/delete", async () => {
     const app = buildServer()
     await app.ready()
+
+    vi.spyOn(adapterModule.OpenCodeHttpAdapter.prototype, "runChat").mockResolvedValue({
+      success: true,
+      response: "stack-run",
+      model: "m",
+      mode: "reactive",
+    })
 
     const created = await app.inject({
       method: "POST",
@@ -235,6 +253,10 @@ describe("bridge api", () => {
     })
     expect(toggled.statusCode).toBe(200)
     expect(toggled.json().enabled).toBe(false)
+
+    const run = await app.inject({ method: "POST", url: `/scheduler/task-stacks/${createdBody.job_id}/run` })
+    expect(run.statusCode).toBe(200)
+    expect(run.json().run_id).toBeTruthy()
 
     const deleted = await app.inject({ method: "DELETE", url: `/scheduler/task-stacks/${createdBody.job_id}` })
     expect(deleted.statusCode).toBe(200)

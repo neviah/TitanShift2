@@ -422,6 +422,16 @@ export function buildServer() {
     return { job_id: next.job_id, enabled: next.enabled }
   })
 
+  app.post<{ Params: { job_id: string } }>("/scheduler/template-jobs/:job_id/run", async (req, reply) => {
+    const job = schedulerTemplateJobs.get(req.params.job_id)
+    if (!job) {
+      return reply.code(404).send({ ok: false, error: "job_not_found" })
+    }
+
+    const run = await runScheduledTemplateJob(job)
+    return { ok: true, job_id: job.job_id, task_id: run.task_id, run_id: run.run_id }
+  })
+
   app.get("/scheduler/task-stacks", async () => {
     return [...schedulerTaskStacks.values()].sort((a, b) => a.job_id.localeCompare(b.job_id))
   })
@@ -471,6 +481,16 @@ export function buildServer() {
     const next = { ...row, enabled: parsed.data.enabled }
     schedulerTaskStacks.set(req.params.job_id, next)
     return { job_id: next.job_id, enabled: next.enabled }
+  })
+
+  app.post<{ Params: { job_id: string } }>("/scheduler/task-stacks/:job_id/run", async (req, reply) => {
+    const job = schedulerTaskStacks.get(req.params.job_id)
+    if (!job) {
+      return reply.code(404).send({ ok: false, error: "job_not_found" })
+    }
+
+    const run = await runScheduledTaskStack(job)
+    return { ok: true, job_id: job.job_id, task_id: run.task_id, run_id: run.run_id }
   })
 
   app.post<{ Params: { job_id: string } }>("/scheduler/jobs/:job_id/enabled", async (req, reply) => {

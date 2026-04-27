@@ -128,6 +128,13 @@ export function setSchedulerJobEnabled(jobId: string, enabled: boolean): Promise
   })
 }
 
+export function runSchedulerJob(jobId: string): Promise<{ run_id: string; task_id: string }> {
+  return request(`/scheduler/jobs/${encodeURIComponent(jobId)}/run`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+}
+
 export function fetchSchedulerTemplateJobs(): Promise<SchedulerTemplateJob[]> {
   return request("/scheduler/template-jobs")
 }
@@ -154,6 +161,13 @@ export function setSchedulerTemplateJobEnabled(jobId: string, enabled: boolean):
   })
 }
 
+export function runSchedulerTemplateJob(jobId: string): Promise<{ run_id: string; task_id: string }> {
+  return request(`/scheduler/template-jobs/${encodeURIComponent(jobId)}/run`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+}
+
 export function fetchSchedulerTaskStacks(): Promise<SchedulerTaskStackJob[]> {
   return request("/scheduler/task-stacks")
 }
@@ -177,6 +191,13 @@ export function setSchedulerTaskStackEnabled(jobId: string, enabled: boolean): P
   return request(`/scheduler/task-stacks/${encodeURIComponent(jobId)}/enabled`, {
     method: "POST",
     body: JSON.stringify({ enabled }),
+  })
+}
+
+export function runSchedulerTaskStack(jobId: string): Promise<{ run_id: string; task_id: string }> {
+  return request(`/scheduler/task-stacks/${encodeURIComponent(jobId)}/run`, {
+    method: "POST",
+    body: JSON.stringify({}),
   })
 }
 
