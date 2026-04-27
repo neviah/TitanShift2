@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import type { KeyboardEvent } from "react"
 import {
   cancelTask,
   createSchedulerJob,
@@ -46,6 +47,9 @@ type ChatMessage = {
   role: "user" | "assistant"
   content: string
   pending?: boolean
+  runId?: string
+  runStatus?: "queued" | "running" | "completed" | "failed" | "cancelled"
+  workflowMode?: string
 }
 
 export function App() {
@@ -69,6 +73,7 @@ export function App() {
   const [templateId, setTemplateId] = useState("template-default")
   const [taskStackInput, setTaskStackInput] = useState("task-1,task-2")
   const [tickSummary, setTickSummary] = useState("")
+  const chatThreadRef = useRef<HTMLDivElement | null>(null)
   const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
   const latestSchedulerFailure = schedulerRuns.find((run) => run.status === "failed")
   const recentRuns = runs.slice(0, 5)
@@ -78,11 +83,9 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    const storedApiKey = window.localStorage.getItem("titanshift.providerApiKey")
-    if (storedApiKey) {
-      setProviderApiKey(storedApiKey)
-    }
-  }, [])
+    if (!chatThreadRef.current) return
+    chatThreadRef.current.scrollTop = chatThreadRef.current.scrollHeight
+  }, [chatMessages])
 
   async function refreshAll() {
     const [taskRows, runRows, workspace, config, providers, jobs, templates, stacks] = await Promise.all([
@@ -101,6 +104,7 @@ export function App() {
     setWorkspaceRootState(workspace.root)
     setModelBackend(String(config["model.default_backend"] ?? ""))
     setProviderDefaultModel(String(config["provider.default_model"] ?? ""))
+    setProviderApiKey(String(config["provider.openrouter_api_key"] ?? ""))
     const backendLower = String(config["model.default_backend"] ?? "").toLowerCase()
     setProviderMode(backendLower.includes("openrouter") ? "openrouter" : "local")
 
@@ -122,10 +126,14 @@ export function App() {
 
     const userMessageId = `u-${Date.now()}`
     const assistantMessageId = `a-${Date.now()}`
+    const updateAssistant = (updater: (message: ChatMessage) => ChatMessage) => {
+      setChatMessages((prev) => prev.map((msg) => (msg.id === assistantMessageId ? updater(msg) : msg)))
+    }
+
     setChatMessages((prev) => [
       ...prev,
       { id: userMessageId, role: "user", content: userPrompt },
-      { id: assistantMessageId, role: "assistant", content: "", pending: true },
+      { id: assistantMessageId, role: "assistant", content: "", pending: true, runStatus: "queued" },
     ])
     setPrompt("")
 
@@ -134,15 +142,41 @@ export function App() {
     try {
       await streamChat(userPrompt, (event: StreamEvent) => {
         if (event.type === "start" && typeof event.run_id === "string") {
-          streamedRunId = event.run_id
-          setActiveRunId(event.run_id)
+          const runId = event.run_id
+          streamedRunId = runId
+          setActiveRunId(runId)
+          updateAssistant((msg) => ({
+            ...msg,
+            runId,
+            runStatus: "running",
+            workflowMode: typeof event.workflow_mode === "string" ? event.workflow_mode : msg.workflowMode,
+          }))
+          return
         }
-        if (event.type === "text_delta" && typeof event.delta === "string") {
-          setChatMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMessageId ? { ...msg, content: `${msg.content}${event.delta}` } : msg,
-            ),
-          )
+
+        if (event.type === "text_delta") {
+          const chunk = typeof event.delta === "string" ? event.delta : typeof event.text === "string" ? event.text : ""
+          if (!chunk) return
+          updateAssistant((msg) => ({ ...msg, content: `${msg.content}${chunk}` }))
+          return
+        }
+
+        if (event.type === "done") {
+          updateAssistant((msg) => ({
+            ...msg,
+            runStatus: event.success === false ? "failed" : "completed",
+            workflowMode: typeof event.workflow_mode === "string" ? event.workflow_mode : msg.workflowMode,
+          }))
+          return
+        }
+
+        if (event.type === "error") {
+          const errorText = typeof event.error === "string" ? event.error : "stream_error"
+          updateAssistant((msg) => ({
+            ...msg,
+            runStatus: "failed",
+            content: msg.content || `Request failed: ${errorText}`,
+          }))
         }
       })
 
@@ -154,11 +188,12 @@ export function App() {
     } catch (error) {
       const fallback = await sendChat(userPrompt)
       const fallbackText = fallback.response || fallback.error || `Request failed: ${String(error)}`
-      setChatMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMessageId ? { ...msg, content: fallbackText } : msg,
-        ),
-      )
+      updateAssistant((msg) => ({
+        ...msg,
+        content: fallbackText,
+        runId: fallback.run_id ?? msg.runId,
+        runStatus: fallback.success ? "completed" : "failed",
+      }))
       if (fallback.run_id) {
         setActiveRunId(fallback.run_id)
         const detail = await fetchRun(fallback.run_id)
@@ -166,11 +201,7 @@ export function App() {
       }
       await refreshAll()
     } finally {
-      setChatMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMessageId ? { ...msg, pending: false, content: msg.content || "No response" } : msg,
-        ),
-      )
+      updateAssistant((msg) => ({ ...msg, pending: false, content: msg.content || "No response" }))
       setStreaming(false)
     }
   }
@@ -197,7 +228,7 @@ export function App() {
     const backendValue = providerMode === "openrouter" ? "openrouter" : "lmstudio"
     await updateConfig("model.default_backend", backendValue)
     await updateConfig("provider.default_model", providerDefaultModel)
-    window.localStorage.setItem("titanshift.providerApiKey", providerApiKey)
+    await updateConfig("provider.openrouter_api_key", providerMode === "openrouter" ? providerApiKey : "")
     await refreshAll()
   }
 
@@ -214,6 +245,13 @@ export function App() {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
     return date.toLocaleString()
+  }
+
+  function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault()
+      void handleSendChat()
+    }
   }
 
   return (
@@ -254,6 +292,7 @@ export function App() {
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={handlePromptKeyDown}
                 rows={4}
                 className="control-input prompt-area"
                 placeholder="Type your request..."
@@ -281,12 +320,19 @@ export function App() {
 
               <div className="control-card">
               <h3>Conversation</h3>
-              <div className="chat-thread">
+              <div ref={chatThreadRef} className="chat-thread">
                 {chatMessages.length === 0 && <div className="muted">No messages yet.</div>}
                 {chatMessages.map((message) => (
                   <div key={message.id} className={`chat-bubble ${message.role === "user" ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
                     <div className="chat-role">{message.role === "user" ? "You" : "TitanShift"}</div>
                     <div className="chat-content">{message.content || (message.pending ? "..." : "No response")}</div>
+                    {message.role === "assistant" && (message.runId || message.runStatus || message.workflowMode) && (
+                      <div className="chat-meta-row">
+                        {message.runStatus && <span className={`badge ${statusClass(message.runStatus)}`}>{message.runStatus}</span>}
+                        {message.workflowMode && <span className="badge status-queued">{message.workflowMode}</span>}
+                        {message.runId && <span className="badge status-cancelled">run {message.runId.slice(0, 8)}</span>}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -547,7 +593,7 @@ export function App() {
                     Save
                   </button>
                 </div>
-                <p className="muted">Current backend key: {modelBackend || "(unset)"}</p>
+                <p className="muted">Current backend: {modelBackend || "(unset)"}</p>
               </div>
             </section>
           )}

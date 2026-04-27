@@ -10,6 +10,7 @@ export type ChatRequest = {
   history?: ChatHistoryMessage[]
   model_backend?: string
   workflow_mode?: WorkflowMode
+  openrouter_api_key?: string
   spec_approved?: boolean
   plan_approved?: boolean
   plan_tasks?: Array<Record<string, unknown>>
@@ -116,5 +117,6 @@ export type ConfigProvidersResponse = {
 
 export type RuntimeSettings = {
   model_default_backend: string
+  provider_openrouter_api_key: string
   provider_default_model: string
 }

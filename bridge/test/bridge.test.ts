@@ -417,6 +417,12 @@ describe("bridge api", () => {
         payload: { key: "provider.default_model", value: "openai/gpt-4.1" },
       })
 
+      await app1.inject({
+        method: "POST",
+        url: "/config",
+        payload: { key: "provider.openrouter_api_key", value: "sk-or-v1-test-key" },
+      })
+
       const setRoot = await app1.inject({
         method: "POST",
         url: "/workspace/set-root",
@@ -446,6 +452,7 @@ describe("bridge api", () => {
       expect(stacks.json().length).toBe(1)
       expect(config.json()["model.default_backend"]).toBe("openai/gpt-4.1")
       expect(config.json()["provider.default_model"]).toBe("openai/gpt-4.1")
+      expect(config.json()["provider.openrouter_api_key"]).toBe("sk-or-v1-test-key")
       expect(workspace.json().root).toBe(resolve(tmpdir()))
 
       await app2.close()

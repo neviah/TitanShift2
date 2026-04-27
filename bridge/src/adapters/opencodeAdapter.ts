@@ -35,7 +35,7 @@ export class OpenCodeHttpAdapter implements ExecutionAdapter {
 
     const createSession = await fetch(`${this.baseUrl}/session${directoryQuery}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: buildBridgeHeaders(input.payload.openrouter_api_key),
       body: JSON.stringify({ title: input.payload.prompt.slice(0, 80) }),
     })
 
@@ -66,7 +66,7 @@ export class OpenCodeHttpAdapter implements ExecutionAdapter {
       `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/message${directoryQuery}`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: buildBridgeHeaders(input.payload.openrouter_api_key),
         body: JSON.stringify({
           parts: [{ type: "text", text: input.payload.prompt }],
         }),
@@ -134,6 +134,14 @@ export class OpenCodeHttpAdapter implements ExecutionAdapter {
     }
     return body
   }
+}
+
+function buildBridgeHeaders(openrouterApiKey?: string): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (openrouterApiKey) {
+    headers["x-openrouter-api-key"] = openrouterApiKey
+  }
+  return headers
 }
 
 async function safeJson(response: Response): Promise<unknown> {

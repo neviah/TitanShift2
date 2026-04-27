@@ -101,6 +101,7 @@ export function buildServer() {
   let settings: RuntimeSettings = {
     model_default_backend: "opencode/default",
     provider_default_model: "opencode/default",
+    provider_openrouter_api_key: "",
   }
 
   hydrateSchedulerState()
@@ -115,10 +116,7 @@ export function buildServer() {
       return reply.code(400).send({ success: false, error: "invalid_request", details: parsed.error.issues })
     }
 
-    const payload: ChatRequest = {
-      ...parsed.data,
-      model_backend: parsed.data.model_backend ?? settings.model_default_backend,
-    }
+    const payload = applyRuntimeSettings(parsed.data)
     const executed = await executeChatTask(payload)
     if (!executed.ok) {
       return reply.code(500).send({
@@ -145,10 +143,7 @@ export function buildServer() {
       return reply.code(400).send({ ok: false, error: "invalid_request", details: parsed.error.issues })
     }
 
-    const payload: ChatRequest = {
-      ...parsed.data,
-      model_backend: parsed.data.model_backend ?? settings.model_default_backend,
-    }
+    const payload = applyRuntimeSettings(parsed.data)
 
     const executed = await executeChatTask(payload)
     return {
@@ -194,10 +189,7 @@ export function buildServer() {
       return reply.code(400).send({ success: false, error: "invalid_request", details: parsed.error.issues })
     }
 
-    const payload: ChatRequest = {
-      ...parsed.data,
-      model_backend: parsed.data.model_backend ?? settings.model_default_backend,
-    }
+    const payload = applyRuntimeSettings(parsed.data)
 
     reply.raw.setHeader("Content-Type", "text/event-stream")
     reply.raw.setHeader("Cache-Control", "no-cache")
@@ -334,6 +326,7 @@ export function buildServer() {
   app.get("/config", async () => ({
     "model.default_backend": settings.model_default_backend,
     "provider.default_model": settings.provider_default_model,
+    "provider.openrouter_api_key": settings.provider_openrouter_api_key,
   }))
 
   app.get("/config/providers", async () => {
@@ -352,6 +345,9 @@ export function buildServer() {
     }
     if (parsed.data.key === "provider.default_model" && typeof parsed.data.value === "string") {
       settings.provider_default_model = parsed.data.value
+    }
+    if (parsed.data.key === "provider.openrouter_api_key" && typeof parsed.data.value === "string") {
+      settings.provider_openrouter_api_key = parsed.data.value
     }
 
     persistSchedulerState()
@@ -605,11 +601,11 @@ export function buildServer() {
       workspace_root: activeWorkspaceRoot,
     })
 
-    const payload: ChatRequest = {
+    const payload = applyRuntimeSettings({
       prompt: job.task_prompt,
-      model_backend: job.model_backend ?? settings.model_default_backend,
+      model_backend: job.model_backend,
       workflow_mode: job.workflow_mode ?? "lightning",
-    }
+    })
 
     const adapterResult = await withTimeout(
       adapter.runChat({
@@ -678,6 +674,9 @@ export function buildServer() {
         if (typeof parsed.settings.provider_default_model === "string") {
           settings.provider_default_model = parsed.settings.provider_default_model
         }
+        if (typeof parsed.settings.provider_openrouter_api_key === "string") {
+          settings.provider_openrouter_api_key = parsed.settings.provider_openrouter_api_key
+        }
       }
 
       schedulerStore.replaceAll(Array.isArray(parsed.jobs) ? parsed.jobs : [])
@@ -726,6 +725,16 @@ export function buildServer() {
       return statSync(path).isDirectory()
     } catch {
       return false
+    }
+  }
+
+  function applyRuntimeSettings(payload: ChatRequest): ChatRequest {
+    const modelBackend = payload.model_backend ?? settings.model_default_backend
+    const includeOpenRouterKey = modelBackend.toLowerCase().includes("openrouter")
+    return {
+      ...payload,
+      model_backend: modelBackend,
+      openrouter_api_key: includeOpenRouterKey ? settings.provider_openrouter_api_key : undefined,
     }
   }
 
