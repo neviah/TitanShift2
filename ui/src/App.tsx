@@ -74,6 +74,8 @@ export function App() {
   const [taskStackInput, setTaskStackInput] = useState("task-1,task-2")
   const [tickSummary, setTickSummary] = useState("")
   const [workspaceHistory, setWorkspaceHistory] = useState<string[]>([])
+  const [apiKeyTestStatus, setApiKeyTestStatus] = useState<"idle" | "testing" | "success" | "failed">("idle")
+  const [apiKeyTestMessage, setApiKeyTestMessage] = useState("")
   const chatThreadRef = useRef<HTMLDivElement | null>(null)
   const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
   const latestSchedulerFailure = schedulerRuns.find((run) => run.status === "failed")
@@ -252,6 +254,41 @@ export function App() {
     localStorage.setItem("titanshift-workspace-history", JSON.stringify(updated))
     
     await refreshAll()
+  }
+
+  async function testOpenRouterApiKey() {
+    if (!providerApiKey.trim()) {
+      setApiKeyTestStatus("failed")
+      setApiKeyTestMessage("API key cannot be empty")
+      return
+    }
+
+    setApiKeyTestStatus("testing")
+    setApiKeyTestMessage("Testing connection...")
+
+    try {
+      // Simple test: try a minimal API call to OpenRouter
+      const response = await fetch("https://openrouter.ai/api/v1/models", {
+        headers: {
+          Authorization: `Bearer ${providerApiKey}`,
+        },
+      })
+
+      if (response.ok) {
+        setApiKeyTestStatus("success")
+        setApiKeyTestMessage("API key is valid! ✓")
+        setTimeout(() => setApiKeyTestStatus("idle"), 3000)
+      } else if (response.status === 401) {
+        setApiKeyTestStatus("failed")
+        setApiKeyTestMessage("Invalid API key (401 Unauthorized)")
+      } else {
+        setApiKeyTestStatus("failed")
+        setApiKeyTestMessage(`Error: ${response.status} ${response.statusText}`)
+      }
+    } catch (error) {
+      setApiKeyTestStatus("failed")
+      setApiKeyTestMessage("Network error - cannot reach OpenRouter")
+    }
   }
 
   function statusClass(status: string) {
@@ -647,29 +684,44 @@ export function App() {
               <div className="control-card control-card-wide">
                 <h2>Settings</h2>
                 <p className="muted section-copy">
-                  Keep this simple: pick provider type, set model name, and add API key when using OpenRouter.
+                  Configure your model provider, select a model, and add authentication when needed.
                 </p>
               </div>
 
               <div className="control-card control-card-wide">
-                <div className="card-eyebrow">Model Setup</div>
-                <h3>Provider and model</h3>
-                <label className="field-label">Provider</label>
+                <div className="card-eyebrow">Provider Configuration</div>
+                <h3>Select provider</h3>
+                <label className="field-label">Model provider</label>
                 <select
                   value={providerMode}
-                  onChange={(e) => setProviderMode(e.target.value as ProviderMode)}
+                  onChange={(e) => {
+                    setProviderMode(e.target.value as ProviderMode)
+                    setApiKeyTestStatus("idle")
+                  }}
                   className="control-input control-input-wide"
                 >
                   <option value="local">Local (LM Studio)</option>
                   <option value="openrouter">OpenRouter</option>
                 </select>
 
+                {providerMode === "local" && (
+                  <div className="muted" style={{ marginTop: "10px", fontSize: "12px" }}>
+                    Requires LM Studio running locally at <strong>http://localhost:1234</strong>
+                  </div>
+                )}
+
+                {providerMode === "openrouter" && (
+                  <div className="muted" style={{ marginTop: "10px", fontSize: "12px" }}>
+                    Get your API key at <strong>https://openrouter.ai/keys</strong>
+                  </div>
+                )}
+
                 <label className="field-label">Model name</label>
                 <input
                   value={providerDefaultModel}
                   onChange={(e) => setProviderDefaultModel(e.target.value)}
                   className="control-input control-input-wide"
-                  placeholder={providerMode === "openrouter" ? "openai/gpt-4.1-mini" : "google/gemma-3-4b"}
+                  placeholder={providerMode === "openrouter" ? "openai/gpt-4-turbo" : "local-model"}
                 />
 
                 {providerMode === "openrouter" && (
@@ -677,20 +729,42 @@ export function App() {
                     <label className="field-label">OpenRouter API key</label>
                     <input
                       value={providerApiKey}
-                      onChange={(e) => setProviderApiKey(e.target.value)}
+                      onChange={(e) => {
+                        setProviderApiKey(e.target.value)
+                        setApiKeyTestStatus("idle")
+                      }}
                       className="control-input control-input-wide"
                       placeholder="sk-or-v1-..."
                       type="password"
                     />
+                    <div className="row" style={{ marginTop: "10px" }}>
+                      <button
+                        onClick={() => void testOpenRouterApiKey()}
+                        disabled={apiKeyTestStatus === "testing"}
+                      >
+                        {apiKeyTestStatus === "testing" ? "Testing..." : "Test API Key"}
+                      </button>
+                      {apiKeyTestStatus !== "idle" && (
+                        <span
+                          className={`badge ${
+                            apiKeyTestStatus === "success"
+                              ? "status-completed"
+                              : "status-failed"
+                          }`}
+                        >
+                          {apiKeyTestMessage}
+                        </span>
+                      )}
+                    </div>
                   </>
                 )}
 
-                <div className="row">
+                <div className="row" style={{ marginTop: "16px" }}>
                   <button className="primary" onClick={() => void saveSimpleProviderSettings()}>
-                    Save
+                    Save Settings
                   </button>
                 </div>
-                <p className="muted">Current backend: {modelBackend || "(unset)"}</p>
+                <p className="muted" style={{ marginTop: "10px" }}>Current backend: <strong>{modelBackend || "(unset)"}</strong></p>
               </div>
             </section>
           )}
