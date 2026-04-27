@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join, resolve } from "node:path"
 import { z } from "zod"
 import { OpenCodeHttpAdapter } from "./adapters/opencodeAdapter.js"
-import { OpenRouterDirectAdapter, checkOpenRouterConnectivity } from "./adapters/openrouterAdapter.js"
+import { checkOpenRouterConnectivity } from "./adapters/openrouterAdapter.js"
 import { TaskStore } from "./store/taskStore.js"
 import { SchedulerStore } from "./store/schedulerStore.js"
 import type {
@@ -256,28 +256,18 @@ export function buildServer() {
         patch_summaries?: unknown[]
       }
 
-      if (isOpenRouterDirect(payload)) {
-        // Direct OpenRouter path — no OpenCode dependency
-        const orAdapter = buildOpenRouterAdapter(payload)
-        result = await orAdapter.streamChat(payload.prompt, (chunk) => {
-          streamEvent({ type: "text_delta", delta: chunk })
-        }, (reasoning) => {
-          streamEvent({ type: "reasoning_delta", delta: reasoning })
-        })
-      } else {
-        result = await withTimeout(
-          adapter.runChat({
-            taskId,
-            runId,
-            workspaceRoot: activeWorkspaceRoot,
-            payload,
-          }),
-          payload.budget?.max_duration_ms,
-        )
+      result = await withTimeout(
+        adapter.runChat({
+          taskId,
+          runId,
+          workspaceRoot: activeWorkspaceRoot,
+          payload,
+        }),
+        payload.budget?.max_duration_ms,
+      )
 
-        if (result.response) {
-          streamEvent({ type: "text_delta", text: result.response })
-        }
+      if (result.response) {
+        streamEvent({ type: "text_delta", text: result.response })
       }
 
       taskStore.updateStatus(taskId, "completed", {
@@ -793,18 +783,6 @@ export function buildServer() {
       provider_model: payload.provider_model ?? settings.provider_default_model,
       openrouter_api_key: includeOpenRouterKey ? settings.provider_openrouter_api_key : undefined,
     }
-  }
-
-  function isOpenRouterDirect(payload: ChatRequest): boolean {
-    const backend = (payload.model_backend ?? "").toLowerCase()
-    return backend.includes("openrouter") && Boolean(payload.openrouter_api_key)
-  }
-
-  function buildOpenRouterAdapter(payload: ChatRequest): OpenRouterDirectAdapter {
-    const model = payload.provider_model && payload.provider_model !== "opencode/default"
-      ? payload.provider_model
-      : settings.provider_default_model
-    return new OpenRouterDirectAdapter(payload.openrouter_api_key!, model)
   }
 
   async function executeChatTask(payload: ChatRequest) {
