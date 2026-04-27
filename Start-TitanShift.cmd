@@ -27,7 +27,7 @@ if not exist "%~dp0opencode-upstream\node_modules" (
 )
 
 echo [2/5] Starting OpenCode upstream on port 4096...
-start "OpenCode Upstream" cmd /k "cd /d ""%~dp0opencode-upstream"" && bun run dev"
+start "OpenCode Upstream" cmd /k "cd /d ""%~dp0opencode-upstream"" && bun run --cwd packages/opencode --conditions=browser src/index.ts serve --port 4096"
 
 echo Waiting for OpenCode health endpoint...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(45); $ok=$false; while((Get-Date)-lt $deadline){ try { $r=Invoke-WebRequest -Uri 'http://127.0.0.1:4096/health' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -ge 200){ $ok=$true; break } } catch {}; Start-Sleep -Milliseconds 700 }; if($ok){ exit 0 } else { exit 1 }"
