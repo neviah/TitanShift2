@@ -73,12 +73,23 @@ export function App() {
   const [templateId, setTemplateId] = useState("template-default")
   const [taskStackInput, setTaskStackInput] = useState("task-1,task-2")
   const [tickSummary, setTickSummary] = useState("")
+  const [workspaceHistory, setWorkspaceHistory] = useState<string[]>([])
   const chatThreadRef = useRef<HTMLDivElement | null>(null)
   const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
   const latestSchedulerFailure = schedulerRuns.find((run) => run.status === "failed")
   const recentRuns = runs.slice(0, 5)
 
   useEffect(() => {
+    // Load workspace history from localStorage
+    const savedHistory = localStorage.getItem("titanshift-workspace-history")
+    if (savedHistory) {
+      try {
+        const parsed = JSON.parse(savedHistory) as string[]
+        setWorkspaceHistory(parsed)
+      } catch {
+        // ignore parse error
+      }
+    }
     void refreshAll()
   }, [])
 
@@ -229,6 +240,17 @@ export function App() {
     await updateConfig("model.default_backend", backendValue)
     await updateConfig("provider.default_model", providerDefaultModel)
     await updateConfig("provider.openrouter_api_key", providerMode === "openrouter" ? providerApiKey : "")
+    await refreshAll()
+  }
+
+  async function switchWorkspace(path: string) {
+    await setWorkspaceRoot(path)
+    
+    // Track in history
+    const updated = [path, ...workspaceHistory.filter((w) => w !== path)].slice(0, 10)
+    setWorkspaceHistory(updated)
+    localStorage.setItem("titanshift-workspace-history", JSON.stringify(updated))
+    
     await refreshAll()
   }
 
@@ -399,18 +421,54 @@ export function App() {
             <section className="section-grid">
               <div className="control-card control-card-wide">
               <h2>Workspace Targeting</h2>
-              <p className="muted">Set the active execution root used by bridge calls.</p>
-              <input value={workspaceRoot} onChange={(e) => setWorkspaceRootState(e.target.value)} className="control-input control-input-wide" />
+              <p className="muted section-copy">Set the active execution root used by all bridge operations.</p>
+              <label className="field-label">Current workspace</label>
+              <input value={workspaceRoot} onChange={(e) => setWorkspaceRootState(e.target.value)} className="control-input control-input-wide" placeholder="/path/to/workspace" />
               <div className="row">
-                <button className="primary" onClick={() => void setWorkspaceRoot(workspaceRoot).then(refreshAll)}>
+                <button className="primary" onClick={() => void switchWorkspace(workspaceRoot)}>
                   Apply Root
                 </button>
               </div>
               </div>
 
+              {workspaceHistory.length > 0 && (
+                <div className="control-card control-card-wide">
+                <h3>Recent workspaces</h3>
+                <p className="muted">Click to quickly switch between previously used workspaces.</p>
+                <div className="list">
+                  {workspaceHistory.map((path) => (
+                    <div key={path} className="item">
+                      <div className="muted" style={{ fontSize: "12px", wordBreak: "break-all" }}>{path}</div>
+                      <div className="row">
+                        <button 
+                          className={workspaceRoot === path ? "primary" : ""} 
+                          onClick={() => void switchWorkspace(path)}
+                        >
+                          {workspaceRoot === path ? "✓ Active" : "Switch"}
+                        </button>
+                        <button 
+                          className="warn" 
+                          onClick={() => {
+                            const updated = workspaceHistory.filter((w) => w !== path)
+                            setWorkspaceHistory(updated)
+                            localStorage.setItem("titanshift-workspace-history", JSON.stringify(updated))
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                </div>
+              )}
+
               <div className="control-card">
-                <h3>Root rules</h3>
-                <div className="muted">The bridge now validates this path, normalizes it, and persists it across restarts.</div>
+                <h3>Workspace rules</h3>
+                <div className="muted">
+                  The bridge validates each path, normalizes it, and persists the current workspace across restarts. 
+                  Your workspace history is stored locally in your browser.
+                </div>
               </div>
             </section>
           )}
