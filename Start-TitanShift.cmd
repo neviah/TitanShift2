@@ -16,7 +16,9 @@ if errorlevel 1 (
 echo [1/5] Preparing OpenCode dependencies...
 if not exist "%~dp0opencode-upstream\node_modules" (
 	echo Running bun install in opencode-upstream...
-	call bun --cwd "%~dp0opencode-upstream" install
+	pushd "%~dp0opencode-upstream"
+	call bun install --ignore-scripts
+	popd
 	if errorlevel 1 (
 		echo [ERROR] bun install failed for opencode-upstream.
 		pause
