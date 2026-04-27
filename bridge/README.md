@@ -23,6 +23,27 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 3. Run tests:
    npm test
 
+## Start Without Terminal
+
+Windows-friendly options for local testing:
+
+1. Double-click `Start-TitanShift.cmd` from the repo root.
+   - Starts OpenCode upstream, the bridge, and the UI in separate windows.
+   - Opens the UI in your browser at `http://127.0.0.1:5173`.
+
+2. In VS Code, use `Terminal > Run Task...` and choose `titanshift-start-all`.
+   - This starts all three services in parallel.
+
+3. If you want one service at a time, run these VS Code tasks individually:
+   - `opencode-dev`
+   - `bridge-dev`
+   - `ui-dev`
+
+Prerequisites:
+
+- `bun` installed for `opencode-upstream`
+- `npm install` completed in `bridge` and `ui`
+
 ## UI shell (initial port)
 
 A minimal bridge-driven UI shell exists in [ui/src/App.tsx](../ui/src/App.tsx) for the 5 core workflows:
