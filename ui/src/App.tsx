@@ -67,6 +67,7 @@ export function App() {
   const [tickSummary, setTickSummary] = useState("")
   const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
   const latestSchedulerFailure = schedulerRuns.find((run) => run.status === "failed")
+  const recentRuns = runs.slice(0, 5)
 
   useEffect(() => {
     void refreshAll()
@@ -191,9 +192,9 @@ export function App() {
     <div className="app-shell">
       <div className="layout">
         <aside className="sidebar">
-          <div className="sidebar-topline">TitanShift Command Surface</div>
-          <div className="logo">TitanShift2</div>
-          <p className="muted">Red control-panel rebuild over OpenCode bridge</p>
+          <div className="sidebar-topline">TitanShift</div>
+          <div className="logo">TITANSHIFT</div>
+          <p className="muted">Control Surface</p>
           {(["chat", "tasks", "workspaces", "scheduler", "settings"] as Tab[]).map((item) => (
             <button
               key={item}
@@ -208,7 +209,7 @@ export function App() {
         <main className="panel">
           <div className="panel-header">
             <div>
-              <div className="panel-kicker">TitanShift Control Panel</div>
+              <div className="panel-kicker">TitanShift Panel</div>
               <h1>{tab.charAt(0).toUpperCase() + tab.slice(1)}</h1>
             </div>
             <div className="panel-status">
@@ -477,15 +478,15 @@ export function App() {
           {tab === "settings" && (
             <section className="section-grid settings-grid">
               <div className="control-card control-card-wide">
-                <h2>Settings Control Deck</h2>
+                <h2>Settings</h2>
                 <p className="muted section-copy">
-                  This panel controls backend routing and provider selection. It should feel like an operator console, not a raw form dump.
+                  Runtime and provider controls. These are the settings currently backed by the bridge API.
                 </p>
               </div>
 
               <div className="control-card">
-                <div className="card-eyebrow">Model routing</div>
-                <h3>Default backend</h3>
+                <div className="card-eyebrow">Model Provider</div>
+                <h3>Routing</h3>
                 <label className="field-label">model.default_backend</label>
                 <input value={modelBackend} onChange={(e) => setModelBackend(e.target.value)} className="control-input control-input-wide" />
                 <div className="row">
@@ -493,12 +494,18 @@ export function App() {
                     Save model backend
                   </button>
                 </div>
-                <p className="muted">This backend is used when a request does not provide an explicit model backend.</p>
+                <p className="muted">Used when requests do not provide an explicit model backend.</p>
+
+                <label className="field-label">provider.default_model</label>
+                <input value={providerDefaultModel} onChange={(e) => setProviderDefaultModel(e.target.value)} className="control-input control-input-wide" />
+                <div className="row">
+                  <button onClick={() => void saveProviderModel()}>Save provider.default_model</button>
+                </div>
               </div>
 
               <div className="control-card">
-                <div className="card-eyebrow">Provider routing</div>
-                <h3>Provider default model</h3>
+                <div className="card-eyebrow">Provider Defaults</div>
+                <h3>Selection</h3>
                 <label className="field-label">provider</label>
                 <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)} className="control-input control-input-wide">
                   <option value="">Select provider</option>
@@ -508,10 +515,7 @@ export function App() {
                     </option>
                   ))}
                 </select>
-                <label className="field-label">provider.default_model</label>
-                <input value={providerDefaultModel} onChange={(e) => setProviderDefaultModel(e.target.value)} className="control-input control-input-wide" />
                 <div className="row">
-                  <button onClick={() => void saveProviderModel()}>Save provider.default_model</button>
                   <button
                     onClick={() => void applyProviderDefault()}
                     disabled={!selectedProvider || !providerDefaults[selectedProvider]}
@@ -525,7 +529,7 @@ export function App() {
               </div>
 
               <div className="control-card control-card-wide">
-                <div className="card-eyebrow">Detected providers</div>
+                <div className="card-eyebrow">Detected Providers</div>
                 <h3>Available provider defaults</h3>
                 <div className="provider-grid">
                   {providerDefaultEntries.length > 0 ? (
@@ -543,6 +547,38 @@ export function App() {
             </section>
           )}
         </main>
+
+        <aside className="run-pane">
+          <div className="run-pane-header">Run</div>
+          <div className="run-pane-tabs">
+            <span className="run-tab active">Logs</span>
+            <span className="run-tab">Health</span>
+          </div>
+
+          <div className="run-card">
+            <div className="run-title">Current Run</div>
+            <div className="run-line"><span>Task</span><strong>{selectedRun?.task_id ?? "idle"}</strong></div>
+            <div className="run-line"><span>Status</span><span className={`badge ${statusClass(selectedRun?.status ?? "queued")}`}>{selectedRun?.status ?? "idle"}</span></div>
+            <div className="run-line"><span>Success</span><span>{selectedRun ? String(selectedRun.success) : "-"}</span></div>
+            <div className="run-line"><span>Error</span><span className="run-error">{selectedRun?.error || "none"}</span></div>
+          </div>
+
+          <div className="run-card">
+            <div className="run-title">Timeline Pulse</div>
+            {recentRuns.length > 0 ? (
+              <div className="run-list">
+                {recentRuns.map((run) => (
+                  <button key={`run-pane-${run.run_id}`} className="run-list-item" onClick={() => void inspectRun(run.run_id)}>
+                    <span className="run-list-id">{run.run_id.slice(0, 8)}</span>
+                    <span className={`badge ${statusClass(run.status)}`}>{run.status}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="muted">No recent workflow events.</div>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   )
