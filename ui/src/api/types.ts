@@ -38,6 +38,8 @@ export type SchedulerTemplateJob = {
   description: string
   schedule_type: "interval" | "cron"
   enabled: boolean
+  interval_seconds?: number
+  cron?: string
 }
 
 export type SchedulerTaskStackJob = {
@@ -46,6 +48,8 @@ export type SchedulerTaskStackJob = {
   description: string
   schedule_type: "interval" | "cron"
   enabled: boolean
+  interval_seconds?: number
+  cron?: string
 }
 
 export type ConfigProvidersResponse = {

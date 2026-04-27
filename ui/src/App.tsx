@@ -480,66 +480,105 @@ export function App() {
               <div className="control-card">
               <h3>Jobs</h3>
               <div className="list">
-                {schedulerJobs.map((job) => (
-                  <div key={job.job_id} className="item">
-                    <div><strong>{job.job_id}</strong> - {job.description}</div>
-                    <div className="row">
-                      <button onClick={() => void setSchedulerJobEnabled(job.job_id, !job.enabled).then(refreshAll)}>
-                        {job.enabled ? "Disable" : "Enable"}
-                      </button>
-                      <button className="primary" onClick={() => void runAndInspect(runSchedulerJob(job.job_id))}>
-                        Run
-                      </button>
-                      <button className="warn" onClick={() => void deleteSchedulerJob(job.job_id).then(refreshAll)}>
-                        Delete
-                      </button>
+                {schedulerJobs.length === 0 ? (
+                  <div className="muted">No jobs created yet.</div>
+                ) : (
+                  schedulerJobs.map((job) => (
+                    <div key={job.job_id} className="item">
+                      <div className="row">
+                        <strong>{job.job_id}</strong>
+                        <span className={`badge ${job.enabled ? "status-running" : "status-cancelled"}`}>
+                          {job.enabled ? "active" : "paused"}
+                        </span>
+                      </div>
+                      <div className="muted">{job.description}</div>
+                      <div className="muted">
+                        schedule: {job.schedule_type === "interval" ? `every ${job.interval_seconds}s` : `cron: ${job.cron}`}
+                      </div>
+                      <div className="row">
+                        <button onClick={() => void setSchedulerJobEnabled(job.job_id, !job.enabled).then(refreshAll)}>
+                          {job.enabled ? "Pause" : "Resume"}
+                        </button>
+                        <button className="primary" onClick={() => void runAndInspect(runSchedulerJob(job.job_id))}>
+                          Run now
+                        </button>
+                        <button className="warn" onClick={() => void deleteSchedulerJob(job.job_id).then(refreshAll)}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
               </div>
 
               <div className="control-card">
               <h3>Template Jobs</h3>
               <div className="list">
-                {templateJobs.map((job) => (
-                  <div key={job.job_id} className="item">
-                    <div><strong>{job.job_id}</strong> - {job.template_id}</div>
-                    <div className="row">
-                      <button onClick={() => void setSchedulerTemplateJobEnabled(job.job_id, !job.enabled).then(refreshAll)}>
-                        {job.enabled ? "Disable" : "Enable"}
-                      </button>
-                      <button className="primary" onClick={() => void runAndInspect(runSchedulerTemplateJob(job.job_id))}>
-                        Run
-                      </button>
-                      <button className="warn" onClick={() => void deleteSchedulerTemplateJob(job.job_id).then(refreshAll)}>
-                        Delete
-                      </button>
+                {templateJobs.length === 0 ? (
+                  <div className="muted">No template jobs created yet.</div>
+                ) : (
+                  templateJobs.map((job) => (
+                    <div key={job.job_id} className="item">
+                      <div className="row">
+                        <strong>{job.job_id}</strong>
+                        <span className={`badge ${job.enabled ? "status-running" : "status-cancelled"}`}>
+                          {job.enabled ? "active" : "paused"}
+                        </span>
+                      </div>
+                      <div className="muted">template: {job.template_id}</div>
+                      <div className="muted">
+                        schedule: {job.schedule_type === "interval" ? `every ${job.interval_seconds}s` : `cron: ${job.cron}`}
+                      </div>
+                      <div className="row">
+                        <button onClick={() => void setSchedulerTemplateJobEnabled(job.job_id, !job.enabled).then(refreshAll)}>
+                          {job.enabled ? "Pause" : "Resume"}
+                        </button>
+                        <button className="primary" onClick={() => void runAndInspect(runSchedulerTemplateJob(job.job_id))}>
+                          Run now
+                        </button>
+                        <button className="warn" onClick={() => void deleteSchedulerTemplateJob(job.job_id).then(refreshAll)}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
               </div>
 
               <div className="control-card">
               <h3>Task Stacks</h3>
               <div className="list">
-                {taskStacks.map((job) => (
-                  <div key={job.job_id} className="item">
-                    <div><strong>{job.job_id}</strong> - {job.task_ids.join(", ")}</div>
-                    <div className="row">
-                      <button onClick={() => void setSchedulerTaskStackEnabled(job.job_id, !job.enabled).then(refreshAll)}>
-                        {job.enabled ? "Disable" : "Enable"}
-                      </button>
-                      <button className="primary" onClick={() => void runAndInspect(runSchedulerTaskStack(job.job_id))}>
-                        Run
-                      </button>
-                      <button className="warn" onClick={() => void deleteSchedulerTaskStack(job.job_id).then(refreshAll)}>
-                        Delete
-                      </button>
+                {taskStacks.length === 0 ? (
+                  <div className="muted">No task stacks created yet.</div>
+                ) : (
+                  taskStacks.map((job) => (
+                    <div key={job.job_id} className="item">
+                      <div className="row">
+                        <strong>{job.job_id}</strong>
+                        <span className={`badge ${job.enabled ? "status-running" : "status-cancelled"}`}>
+                          {job.enabled ? "active" : "paused"}
+                        </span>
+                      </div>
+                      <div className="muted">tasks: {job.task_ids.join(", ")}</div>
+                      <div className="muted">
+                        schedule: {job.schedule_type === "interval" ? `every ${job.interval_seconds}s` : `cron: ${job.cron}`}
+                      </div>
+                      <div className="row">
+                        <button onClick={() => void setSchedulerTaskStackEnabled(job.job_id, !job.enabled).then(refreshAll)}>
+                          {job.enabled ? "Pause" : "Resume"}
+                        </button>
+                        <button className="primary" onClick={() => void runAndInspect(runSchedulerTaskStack(job.job_id))}>
+                          Run now
+                        </button>
+                        <button className="warn" onClick={() => void deleteSchedulerTaskStack(job.job_id).then(refreshAll)}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
               </div>
             </section>
