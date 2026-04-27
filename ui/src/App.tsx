@@ -290,35 +290,41 @@ export function App() {
     ]
     const sessionTitle = activeChat?.title || buildChatTitle(userPrompt)
 
-    const writeChatSession = (messages: ChatMessage[]) => {
-      setChatSessions((prev) => {
-        const nextSession: ChatSession = {
-          id: sessionId,
-          title: sessionTitle,
-          updatedAt: new Date().toISOString(),
-          messages,
-        }
-        const existingIndex = prev.findIndex((session) => session.id === sessionId)
-        if (existingIndex === -1) {
-          return sortChatSessions([nextSession, ...prev])
-        }
+    const upsertSession = (
+      prev: ChatSession[],
+      resolveMessages: (currentMessages: ChatMessage[]) => ChatMessage[],
+    ) => {
+      const existingIndex = prev.findIndex((session) => session.id === sessionId)
+      const baseMessages = existingIndex === -1 ? [] : prev[existingIndex].messages
+      const nextSession: ChatSession = {
+        id: sessionId,
+        title: existingIndex === -1 ? sessionTitle : prev[existingIndex].title,
+        updatedAt: new Date().toISOString(),
+        messages: resolveMessages(baseMessages),
+      }
 
-        const next = [...prev]
-        next[existingIndex] = nextSession
-        return sortChatSessions(next)
-      })
+      if (existingIndex === -1) {
+        return sortChatSessions([nextSession, ...prev])
+      }
+
+      const next = [...prev]
+      next[existingIndex] = nextSession
+      return sortChatSessions(next)
+    }
+
+    const setInitialMessages = () => {
+      setChatSessions((prev) => upsertSession(prev, () => nextMessages))
     }
 
     const updateAssistant = (updater: (message: ChatMessage) => ChatMessage) => {
-      writeChatSession(
-        (chatSessions.find((session) => session.id === sessionId)?.messages ?? nextMessages).map((msg) => (
-          msg.id === assistantMessageId ? updater(msg) : msg
-        )),
-      )
+      setChatSessions((prev) => upsertSession(prev, (currentMessages) => {
+        const source = currentMessages.length > 0 ? currentMessages : nextMessages
+        return source.map((msg) => (msg.id === assistantMessageId ? updater(msg) : msg))
+      }))
     }
 
     setActiveChatId(sessionId)
-    writeChatSession(nextMessages)
+    setInitialMessages()
     setPrompt("")
 
     setStreaming(true)
