@@ -62,7 +62,15 @@ type ChatSession = {
   messages: ChatMessage[]
 }
 
+type TaskShelfState = {
+  hiddenIds: string[]
+  labels: Record<string, string>
+}
+
 const CHAT_STORAGE_KEY = "titanshift-chat-sessions"
+const ACTIVE_CHAT_STORAGE_KEY = "titanshift-active-chat-id"
+const TASK_SHELF_STORAGE_KEY = "titanshift-task-shelf"
+const EMPTY_TASK_SHELF: TaskShelfState = { hiddenIds: [], labels: {} }
 
 function createChatId() {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -124,6 +132,7 @@ export function App() {
   const [prompt, setPrompt] = useState("")
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const [activeChatId, setActiveChatId] = useState("")
+  const [taskShelfState, setTaskShelfState] = useState<TaskShelfState>(EMPTY_TASK_SHELF)
   const [activeRunId, setActiveRunId] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [tasks, setTasks] = useState<TaskSummary[]>([])
@@ -155,16 +164,32 @@ export function App() {
   const recentRuns = runs.slice(0, 5)
   const activeChat = chatSessions.find((session) => session.id === activeChatId) ?? null
   const chatMessages = activeChat?.messages ?? []
+  const visibleTasks = tasks.filter((task) => !taskShelfState.hiddenIds.includes(task.task_id))
+  const enabledSchedulerJobs = schedulerJobs.filter((job) => job.enabled).length
   const mainPaneTab = tab === "tasks" ? "chat" : tab
 
   useEffect(() => {
+    const savedActiveChatId = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) ?? ""
     const savedChats = localStorage.getItem(CHAT_STORAGE_KEY)
     if (savedChats) {
       try {
         const parsed = JSON.parse(savedChats) as ChatSession[]
         const sorted = sortChatSessions(parsed)
         setChatSessions(sorted)
-        setActiveChatId(sorted[0]?.id ?? "")
+        setActiveChatId(sorted.some((session) => session.id === savedActiveChatId) ? savedActiveChatId : (sorted[0]?.id ?? ""))
+      } catch {
+        // ignore parse error
+      }
+    }
+
+    const savedTaskShelf = localStorage.getItem(TASK_SHELF_STORAGE_KEY)
+    if (savedTaskShelf) {
+      try {
+        const parsed = JSON.parse(savedTaskShelf) as TaskShelfState
+        setTaskShelfState({
+          hiddenIds: Array.isArray(parsed.hiddenIds) ? parsed.hiddenIds : [],
+          labels: parsed.labels && typeof parsed.labels === "object" ? parsed.labels : {},
+        })
       } catch {
         // ignore parse error
       }
@@ -185,6 +210,18 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatSessions))
   }, [chatSessions])
+
+  useEffect(() => {
+    if (activeChatId) {
+      localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, activeChatId)
+      return
+    }
+    localStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY)
+  }, [activeChatId])
+
+  useEffect(() => {
+    localStorage.setItem(TASK_SHELF_STORAGE_KEY, JSON.stringify(taskShelfState))
+  }, [taskShelfState])
 
   // Poll health status every 10s
   useEffect(() => {
@@ -379,6 +416,34 @@ export function App() {
     }
   }
 
+  function renameTaskShelfItem(task: TaskSummary) {
+    const currentLabel = taskShelfState.labels[task.task_id] ?? task.description ?? task.task_id
+    const nextLabel = window.prompt("Rename task for the left shelf", currentLabel)
+    if (nextLabel === null) return
+
+    const normalized = nextLabel.trim()
+    setTaskShelfState((prev) => {
+      const labels = { ...prev.labels }
+      if (!normalized || normalized === task.description || normalized === task.task_id) {
+        delete labels[task.task_id]
+      } else {
+        labels[task.task_id] = normalized
+      }
+      return { ...prev, labels }
+    })
+  }
+
+  function hideTaskShelfItem(taskId: string) {
+    setTaskShelfState((prev) => ({
+      ...prev,
+      hiddenIds: prev.hiddenIds.includes(taskId) ? prev.hiddenIds : [...prev.hiddenIds, taskId],
+    }))
+  }
+
+  function restoreHiddenTaskShelfItems() {
+    setTaskShelfState((prev) => ({ ...prev, hiddenIds: [] }))
+  }
+
   async function inspectRun(runId: string) {
     const detail = await fetchRun(runId)
     setActiveRunId(runId)
@@ -469,6 +534,10 @@ export function App() {
     return lastMessage?.content ?? "No messages yet"
   }
 
+  function taskShelfLabel(task: TaskSummary) {
+    return taskShelfState.labels[task.task_id] ?? task.description ?? task.task_id
+  }
+
   return (
     <div className="app-shell">
       <div className="layout">
@@ -531,23 +600,42 @@ export function App() {
                     <div className="sidebar-context-kicker">Task shelf</div>
                     <strong>Saved tasks</strong>
                   </div>
-                  <button onClick={() => void refreshAll()} className="sidebar-mini-action">Refresh</button>
+                  <div className="sidebar-action-row">
+                    {taskShelfState.hiddenIds.length > 0 && (
+                      <button onClick={restoreHiddenTaskShelfItems} className="sidebar-mini-action">Restore</button>
+                    )}
+                    <button onClick={() => void refreshAll()} className="sidebar-mini-action">Refresh</button>
+                  </div>
                 </div>
 
-                {tasks.length === 0 ? (
+                <div className="sidebar-anchor-card">
+                  <div className="sidebar-item-title">Task anchor</div>
+                  <div className="sidebar-item-copy">Rename and remove here only affects the left shelf. Bridge task records stay intact.</div>
+                </div>
+
+                {visibleTasks.length === 0 ? (
                   <div className="sidebar-empty">No saved tasks returned by the bridge.</div>
                 ) : (
                   <div className="sidebar-list">
-                    {tasks.map((task) => (
-                      <button
-                        key={task.task_id}
-                        className={`sidebar-list-item ${activeRunId === task.run_id ? "active" : ""}`}
-                        onClick={() => void inspectRun(task.run_id)}
-                      >
-                        <span className="sidebar-item-title">{task.task_id}</span>
-                        <span className="sidebar-item-meta">{task.status}</span>
-                        <span className="sidebar-item-copy">{task.description || task.run_id}</span>
-                      </button>
+                    {visibleTasks.map((task) => (
+                      <div key={task.task_id} className="sidebar-list-row sidebar-list-row-wide">
+                        <button
+                          className={`sidebar-list-item ${activeRunId === task.run_id ? "active" : ""}`}
+                          onClick={() => void inspectRun(task.run_id)}
+                        >
+                          <span className="sidebar-item-title">{taskShelfLabel(task)}</span>
+                          <span className="sidebar-item-meta">{task.status} · {formatTimestamp(task.created_at)}</span>
+                          <span className="sidebar-item-copy">{task.task_id}</span>
+                        </button>
+                        <div className="sidebar-inline-actions">
+                          <button className="sidebar-icon-action" onClick={() => renameTaskShelfItem(task)} title="Rename task in shelf">
+                            edit
+                          </button>
+                          <button className="sidebar-icon-action" onClick={() => hideTaskShelfItem(task.task_id)} title="Remove task from shelf">
+                            x
+                          </button>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -559,9 +647,15 @@ export function App() {
                 <div className="sidebar-context-header">
                   <div>
                     <div className="sidebar-context-kicker">Workspace shelf</div>
-                    <strong>Recent roots</strong>
+                    <strong>Anchor and history</strong>
                   </div>
                 </div>
+                <div className="sidebar-anchor-card">
+                  <div className="sidebar-item-title">Workspace anchor</div>
+                  <div className="sidebar-item-meta">Current execution root</div>
+                  <div className="sidebar-item-copy">{workspaceRoot || "No workspace selected"}</div>
+                </div>
+                <div className="sidebar-section-label">Recent roots</div>
                 {workspaceHistory.length === 0 ? (
                   <div className="sidebar-empty">Workspace shortcuts will appear here after you switch roots.</div>
                 ) : (
@@ -586,14 +680,26 @@ export function App() {
                 <div className="sidebar-context-header">
                   <div>
                     <div className="sidebar-context-kicker">Scheduler shelf</div>
-                    <strong>Runtime heartbeat</strong>
+                    <strong>Heartbeat and recent runs</strong>
                   </div>
                 </div>
+                <div className="sidebar-anchor-card">
+                  <div className="sidebar-item-title">Scheduler anchor</div>
+                  <div className="sidebar-item-meta">{enabledSchedulerJobs} active of {schedulerJobs.length} jobs</div>
+                  <div className="sidebar-item-copy">{tickSummary || "No manual tick yet. Use Tick Now in the main pane when needed."}</div>
+                </div>
+                <div className="sidebar-action-row">
+                  <button className="sidebar-mini-action" onClick={() => void handleTick()}>Tick now</button>
+                  <button
+                    className="sidebar-mini-action"
+                    onClick={() => latestSchedulerFailure && void inspectRun(latestSchedulerFailure.run_id)}
+                    disabled={!latestSchedulerFailure}
+                  >
+                    Inspect failure
+                  </button>
+                </div>
+                <div className="sidebar-section-label">Recent scheduler runs</div>
                 <div className="sidebar-list">
-                  <div className="sidebar-stat-card">
-                    <span className="sidebar-item-title">Jobs</span>
-                    <span className="sidebar-item-copy">{schedulerJobs.length} configured</span>
-                  </div>
                   <div className="sidebar-stat-card">
                     <span className="sidebar-item-title">Task stacks</span>
                     <span className="sidebar-item-copy">{taskStacks.length} configured</span>
@@ -602,6 +708,17 @@ export function App() {
                     <span className="sidebar-item-title">Latest failure</span>
                     <span className="sidebar-item-copy">{latestSchedulerFailure?.task_id ?? "None"}</span>
                   </div>
+                  {schedulerRuns.slice(0, 4).map((run) => (
+                    <button
+                      key={run.run_id}
+                      className={`sidebar-list-item ${activeRunId === run.run_id ? "active" : ""}`}
+                      onClick={() => void inspectRun(run.run_id)}
+                    >
+                      <span className="sidebar-item-title">{run.task_id}</span>
+                      <span className="sidebar-item-meta">{run.status} · {formatTimestamp(run.created_at)}</span>
+                      <span className="sidebar-item-copy">{run.description}</span>
+                    </button>
+                  ))}
                 </div>
               </>
             )}
