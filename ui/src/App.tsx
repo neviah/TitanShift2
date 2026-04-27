@@ -9,6 +9,8 @@ import {
   deleteSchedulerTemplateJob,
   fetchConfig,
   fetchConfigProviders,
+  fetchRun,
+  fetchRuns,
   fetchSchedulerJobs,
   fetchSchedulerTaskStacks,
   fetchSchedulerTemplateJobs,
@@ -24,6 +26,8 @@ import {
   updateConfig,
 } from "./api/client"
 import type {
+  RunDetail,
+  RunSummary,
   SchedulerJob,
   SchedulerTaskStackJob,
   SchedulerTemplateJob,
@@ -39,8 +43,12 @@ export function App() {
   const [prompt, setPrompt] = useState("")
   const [chatResult, setChatResult] = useState("")
   const [chatStreamLog, setChatStreamLog] = useState<string[]>([])
+  const [chatStreamText, setChatStreamText] = useState("")
+  const [activeRunId, setActiveRunId] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [tasks, setTasks] = useState<TaskSummary[]>([])
+  const [runs, setRuns] = useState<RunSummary[]>([])
+  const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null)
   const [workspaceRoot, setWorkspaceRootState] = useState("")
   const [schedulerJobs, setSchedulerJobs] = useState<SchedulerJob[]>([])
   const [templateJobs, setTemplateJobs] = useState<SchedulerTemplateJob[]>([])
@@ -59,8 +67,9 @@ export function App() {
   }, [])
 
   async function refreshAll() {
-    const [taskRows, workspace, config, providers, jobs, templates, stacks] = await Promise.all([
+    const [taskRows, runRows, workspace, config, providers, jobs, templates, stacks] = await Promise.all([
       fetchTasks(),
+      fetchRuns(),
       fetchWorkspaceInfo(),
       fetchConfig(),
       fetchConfigProviders().catch(() => ({ providers: [], default: {} })),
@@ -70,6 +79,7 @@ export function App() {
     ])
 
     setTasks(taskRows)
+    setRuns(runRows.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)))
     setWorkspaceRootState(workspace.root)
     setModelBackend(String(config["model.default_backend"] ?? ""))
     setProviderDefaultModel(String(config["provider.default_model"] ?? ""))
@@ -85,22 +95,46 @@ export function App() {
   async function handleChat() {
     const result = await sendChat(prompt)
     setChatResult(result.response || result.error || "No response")
+    if (result.run_id) {
+      setActiveRunId(result.run_id)
+      const detail = await fetchRun(result.run_id)
+      setSelectedRun(detail)
+    }
     await refreshAll()
   }
 
   async function handleStreamChat() {
     setStreaming(true)
     setChatStreamLog([])
+    setChatStreamText("")
+    let streamedRunId = ""
     try {
       await streamChat(prompt, (event: StreamEvent) => {
+        if (event.type === "start" && typeof event.run_id === "string") {
+          streamedRunId = event.run_id
+          setActiveRunId(event.run_id)
+        }
+        if (event.type === "text_delta" && typeof event.delta === "string") {
+          setChatStreamText((prev) => prev + event.delta)
+        }
         setChatStreamLog((prev) => [...prev, JSON.stringify(event)])
       })
       await refreshAll()
+      if (streamedRunId) {
+        const detail = await fetchRun(streamedRunId)
+        setSelectedRun(detail)
+      }
     } catch (error) {
       setChatStreamLog((prev) => [...prev, `stream_error:${String(error)}`])
     } finally {
       setStreaming(false)
     }
+  }
+
+  async function inspectRun(runId: string) {
+    const detail = await fetchRun(runId)
+    setActiveRunId(runId)
+    setSelectedRun(detail)
   }
 
   async function handleTick() {
@@ -159,8 +193,23 @@ export function App() {
               </div>
               <h3>Sync reply</h3>
               <div className="chat-log">{chatResult || "No reply yet."}</div>
+              <h3>Stream text</h3>
+              <div className="chat-log">{chatStreamText || "No streamed text yet."}</div>
               <h3>Stream events</h3>
               <div className="chat-log">{chatStreamLog.join("\n") || "No stream events yet."}</div>
+              <h3>Active run</h3>
+              <div className="item">
+                <div><strong>run_id:</strong> {activeRunId || "none"}</div>
+                {selectedRun ? (
+                  <div>
+                    <div><strong>status:</strong> {selectedRun.status}</div>
+                    <div><strong>task_id:</strong> {selectedRun.task_id}</div>
+                    <div><strong>success:</strong> {String(selectedRun.success)}</div>
+                  </div>
+                ) : (
+                  <div className="muted">No run selected.</div>
+                )}
+              </div>
             </section>
           )}
 
@@ -175,15 +224,38 @@ export function App() {
                   <div key={task.task_id} className="item">
                     <div><strong>{task.task_id}</strong></div>
                     <div className="muted">{task.description}</div>
+                    <div className="muted">run_id: {task.run_id}</div>
                     <div>Status: {task.status}</div>
                     <div className="row">
                       <button className="warn" onClick={() => void cancelTask(task.task_id).then(refreshAll)}>
                         Cancel
                       </button>
+                      <button onClick={() => void inspectRun(task.run_id)}>Inspect Run</button>
                     </div>
                   </div>
                 ))}
               </div>
+
+              <h3 style={{ marginTop: 14 }}>Recent runs</h3>
+              <div className="list">
+                {runs.slice(0, 10).map((run) => (
+                  <div key={run.run_id} className="item">
+                    <div><strong>{run.run_id}</strong></div>
+                    <div className="muted">task: {run.task_id}</div>
+                    <div>Status: {run.status}</div>
+                    <div className="row">
+                      <button onClick={() => void inspectRun(run.run_id)}>Inspect</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {selectedRun && (
+                <div style={{ marginTop: 14 }}>
+                  <h3>Run detail</h3>
+                  <div className="chat-log">{JSON.stringify(selectedRun.output, null, 2)}</div>
+                </div>
+              )}
             </section>
           )}
 
@@ -230,6 +302,20 @@ export function App() {
                 </button>
               </div>
               <p className="muted">{tickSummary}</p>
+
+              <h3>Latest run activity</h3>
+              <div className="list">
+                {runs.slice(0, 5).map((run) => (
+                  <div key={`sched-${run.run_id}`} className="item">
+                    <div><strong>{run.run_id}</strong></div>
+                    <div className="muted">task: {run.task_id}</div>
+                    <div>Status: {run.status}</div>
+                    <div className="row">
+                      <button onClick={() => void inspectRun(run.run_id)}>Inspect</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
               <h3>Jobs</h3>
               <div className="list">

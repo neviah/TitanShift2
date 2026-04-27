@@ -1,6 +1,8 @@
 import type {
   ChatResponse,
   ConfigProvidersResponse,
+  RunDetail,
+  RunSummary,
   SchedulerJob,
   SchedulerTaskStackJob,
   SchedulerTickResponse,
@@ -65,6 +67,14 @@ export function streamChat(
 
 export function fetchTasks(): Promise<TaskSummary[]> {
   return request("/tasks")
+}
+
+export function fetchRuns(): Promise<RunSummary[]> {
+  return request("/runs")
+}
+
+export function fetchRun(runId: string): Promise<RunDetail> {
+  return request(`/runs/${encodeURIComponent(runId)}`)
 }
 
 export function cancelTask(taskId: string): Promise<{ cancelled: boolean }> {

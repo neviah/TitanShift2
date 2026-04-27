@@ -60,3 +60,22 @@ export type SchedulerTickResponse = {
   auto_disabled_jobs: string[]
   job_count: number
 }
+
+export type RunSummary = {
+  run_id: string
+  task_id: string
+  status: string
+  created_at: string
+  completed_at: string | null
+  success: boolean | null
+  error: string | null
+}
+
+export type RunDetail = {
+  run_id: string
+  task_id: string
+  status: string
+  output: Record<string, unknown>
+  error: string | null
+  success: boolean | null
+}
