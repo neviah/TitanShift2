@@ -40,13 +40,18 @@ import type {
 import "./App.css"
 
 type Tab = "chat" | "tasks" | "workspaces" | "scheduler" | "settings"
+type ProviderMode = "local" | "openrouter"
+type ChatMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  pending?: boolean
+}
 
 export function App() {
   const [tab, setTab] = useState<Tab>("chat")
   const [prompt, setPrompt] = useState("")
-  const [chatResult, setChatResult] = useState("")
-  const [chatStreamLog, setChatStreamLog] = useState<string[]>([])
-  const [chatStreamText, setChatStreamText] = useState("")
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [activeRunId, setActiveRunId] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [tasks, setTasks] = useState<TaskSummary[]>([])
@@ -58,9 +63,8 @@ export function App() {
   const [taskStacks, setTaskStacks] = useState<SchedulerTaskStackJob[]>([])
   const [modelBackend, setModelBackend] = useState("")
   const [providerDefaultModel, setProviderDefaultModel] = useState("")
-  const [providerOptions, setProviderOptions] = useState<Array<{ id: string; name: string }>>([])
-  const [providerDefaults, setProviderDefaults] = useState<Record<string, string>>({})
-  const [selectedProvider, setSelectedProvider] = useState("")
+  const [providerMode, setProviderMode] = useState<ProviderMode>("local")
+  const [providerApiKey, setProviderApiKey] = useState("")
   const [schedulerPrompt, setSchedulerPrompt] = useState("Say hello from scheduler")
   const [templateId, setTemplateId] = useState("template-default")
   const [taskStackInput, setTaskStackInput] = useState("task-1,task-2")
@@ -71,6 +75,13 @@ export function App() {
 
   useEffect(() => {
     void refreshAll()
+  }, [])
+
+  useEffect(() => {
+    const storedApiKey = window.localStorage.getItem("titanshift.providerApiKey")
+    if (storedApiKey) {
+      setProviderApiKey(storedApiKey)
+    }
   }, [])
 
   async function refreshAll() {
@@ -90,51 +101,76 @@ export function App() {
     setWorkspaceRootState(workspace.root)
     setModelBackend(String(config["model.default_backend"] ?? ""))
     setProviderDefaultModel(String(config["provider.default_model"] ?? ""))
-    setProviderOptions(providers.providers)
-    setProviderDefaults(providers.default)
-    if (providers.providers.length > 0 && !selectedProvider) {
-      setSelectedProvider(providers.providers[0].id)
+    const backendLower = String(config["model.default_backend"] ?? "").toLowerCase()
+    setProviderMode(backendLower.includes("openrouter") ? "openrouter" : "local")
+
+    const openrouterDefault =
+      providers.default && typeof providers.default === "object" && "openrouter" in providers.default
+        ? providers.default.openrouter
+        : undefined
+    if (!String(config["provider.default_model"] ?? "") && typeof openrouterDefault === "string") {
+      setProviderDefaultModel(openrouterDefault)
     }
     setSchedulerJobs(jobs)
     setTemplateJobs(templates)
     setTaskStacks(stacks)
   }
 
-  async function handleChat() {
-    const result = await sendChat(prompt)
-    setChatResult(result.response || result.error || "No response")
-    if (result.run_id) {
-      setActiveRunId(result.run_id)
-      const detail = await fetchRun(result.run_id)
-      setSelectedRun(detail)
-    }
-    await refreshAll()
-  }
+  async function handleSendChat() {
+    const userPrompt = prompt.trim()
+    if (!userPrompt || streaming) return
 
-  async function handleStreamChat() {
+    const userMessageId = `u-${Date.now()}`
+    const assistantMessageId = `a-${Date.now()}`
+    setChatMessages((prev) => [
+      ...prev,
+      { id: userMessageId, role: "user", content: userPrompt },
+      { id: assistantMessageId, role: "assistant", content: "", pending: true },
+    ])
+    setPrompt("")
+
     setStreaming(true)
-    setChatStreamLog([])
-    setChatStreamText("")
     let streamedRunId = ""
     try {
-      await streamChat(prompt, (event: StreamEvent) => {
+      await streamChat(userPrompt, (event: StreamEvent) => {
         if (event.type === "start" && typeof event.run_id === "string") {
           streamedRunId = event.run_id
           setActiveRunId(event.run_id)
         }
         if (event.type === "text_delta" && typeof event.delta === "string") {
-          setChatStreamText((prev) => prev + event.delta)
+          setChatMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId ? { ...msg, content: `${msg.content}${event.delta}` } : msg,
+            ),
+          )
         }
-        setChatStreamLog((prev) => [...prev, JSON.stringify(event)])
       })
+
       await refreshAll()
       if (streamedRunId) {
         const detail = await fetchRun(streamedRunId)
         setSelectedRun(detail)
       }
     } catch (error) {
-      setChatStreamLog((prev) => [...prev, `stream_error:${String(error)}`])
+      const fallback = await sendChat(userPrompt)
+      const fallbackText = fallback.response || fallback.error || `Request failed: ${String(error)}`
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId ? { ...msg, content: fallbackText } : msg,
+        ),
+      )
+      if (fallback.run_id) {
+        setActiveRunId(fallback.run_id)
+        const detail = await fetchRun(fallback.run_id)
+        setSelectedRun(detail)
+      }
+      await refreshAll()
     } finally {
+      setChatMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessageId ? { ...msg, pending: false, content: msg.content || "No response" } : msg,
+        ),
+      )
       setStreaming(false)
     }
   }
@@ -157,17 +193,11 @@ export function App() {
     await refreshAll()
   }
 
-  async function saveProviderModel() {
+  async function saveSimpleProviderSettings() {
+    const backendValue = providerMode === "openrouter" ? "openrouter" : "lmstudio"
+    await updateConfig("model.default_backend", backendValue)
     await updateConfig("provider.default_model", providerDefaultModel)
-    await refreshAll()
-  }
-
-  async function applyProviderDefault() {
-    if (!selectedProvider) return
-    const providerDefault = providerDefaults[selectedProvider]
-    if (!providerDefault) return
-    setProviderDefaultModel(providerDefault)
-    await updateConfig("provider.default_model", providerDefault)
+    window.localStorage.setItem("titanshift.providerApiKey", providerApiKey)
     await refreshAll()
   }
 
@@ -185,8 +215,6 @@ export function App() {
     if (Number.isNaN(date.getTime())) return value
     return date.toLocaleString()
   }
-
-  const providerDefaultEntries = Object.entries(providerDefaults)
 
   return (
     <div className="app-shell">
@@ -221,20 +249,18 @@ export function App() {
           {tab === "chat" && (
             <section className="section-grid two-up">
               <div className="control-card control-card-wide">
-                <h2>Chat Dispatch</h2>
-                <p className="muted section-copy">Run the active TitanShift prompt against the bridge or streaming path.</p>
+                <h2>Chat</h2>
+                <p className="muted section-copy">One conversation window. Responses stream directly into the same thread.</p>
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={4}
                 className="control-input prompt-area"
+                placeholder="Type your request..."
               />
               <div className="row">
-                <button className="primary" onClick={() => void handleChat()}>
-                  Send Sync
-                </button>
-                <button onClick={() => void handleStreamChat()} disabled={streaming}>
-                  {streaming ? "Streaming..." : "Send Stream"}
+                <button className="primary" onClick={() => void handleSendChat()} disabled={streaming || !prompt.trim()}>
+                  {streaming ? "Sending..." : "Send"}
                 </button>
               </div>
               </div>
@@ -254,18 +280,16 @@ export function App() {
               </div>
 
               <div className="control-card">
-              <h3>Sync reply</h3>
-              <div className="chat-log">{chatResult || "No reply yet."}</div>
+              <h3>Conversation</h3>
+              <div className="chat-thread">
+                {chatMessages.length === 0 && <div className="muted">No messages yet.</div>}
+                {chatMessages.map((message) => (
+                  <div key={message.id} className={`chat-bubble ${message.role === "user" ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
+                    <div className="chat-role">{message.role === "user" ? "You" : "TitanShift"}</div>
+                    <div className="chat-content">{message.content || (message.pending ? "..." : "No response")}</div>
+                  </div>
+                ))}
               </div>
-
-              <div className="control-card">
-              <h3>Stream text</h3>
-              <div className="chat-log">{chatStreamText || "No streamed text yet."}</div>
-              </div>
-
-              <div className="control-card control-card-wide">
-              <h3>Stream events</h3>
-              <div className="chat-log">{chatStreamLog.join("\n") || "No stream events yet."}</div>
               </div>
             </section>
           )}
@@ -480,69 +504,50 @@ export function App() {
               <div className="control-card control-card-wide">
                 <h2>Settings</h2>
                 <p className="muted section-copy">
-                  Runtime and provider controls. These are the settings currently backed by the bridge API.
-                </p>
-              </div>
-
-              <div className="control-card">
-                <div className="card-eyebrow">Model Provider</div>
-                <h3>Routing</h3>
-                <label className="field-label">model.default_backend</label>
-                <input value={modelBackend} onChange={(e) => setModelBackend(e.target.value)} className="control-input control-input-wide" />
-                <div className="row">
-                  <button className="primary" onClick={() => void updateConfig("model.default_backend", modelBackend).then(refreshAll)}>
-                    Save model backend
-                  </button>
-                </div>
-                <p className="muted">Used when requests do not provide an explicit model backend.</p>
-
-                <label className="field-label">provider.default_model</label>
-                <input value={providerDefaultModel} onChange={(e) => setProviderDefaultModel(e.target.value)} className="control-input control-input-wide" />
-                <div className="row">
-                  <button onClick={() => void saveProviderModel()}>Save provider.default_model</button>
-                </div>
-              </div>
-
-              <div className="control-card">
-                <div className="card-eyebrow">Provider Defaults</div>
-                <h3>Selection</h3>
-                <label className="field-label">provider</label>
-                <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)} className="control-input control-input-wide">
-                  <option value="">Select provider</option>
-                  {providerOptions.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.name} ({provider.id})
-                    </option>
-                  ))}
-                </select>
-                <div className="row">
-                  <button
-                    onClick={() => void applyProviderDefault()}
-                    disabled={!selectedProvider || !providerDefaults[selectedProvider]}
-                  >
-                    Use provider default
-                  </button>
-                </div>
-                <p className="muted">
-                  Selected provider default: {selectedProvider ? providerDefaults[selectedProvider] || "(none)" : "(select a provider)"}
+                  Keep this simple: pick provider type, set model name, and add API key when using OpenRouter.
                 </p>
               </div>
 
               <div className="control-card control-card-wide">
-                <div className="card-eyebrow">Detected Providers</div>
-                <h3>Available provider defaults</h3>
-                <div className="provider-grid">
-                  {providerDefaultEntries.length > 0 ? (
-                    providerDefaultEntries.map(([providerId, defaultModel]) => (
-                      <div key={providerId} className="provider-item">
-                        <div className="provider-name">{providerId}</div>
-                        <div className="provider-model">{defaultModel}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="muted">No provider defaults detected from the backend yet.</div>
-                  )}
+                <div className="card-eyebrow">Model Setup</div>
+                <h3>Provider and model</h3>
+                <label className="field-label">Provider</label>
+                <select
+                  value={providerMode}
+                  onChange={(e) => setProviderMode(e.target.value as ProviderMode)}
+                  className="control-input control-input-wide"
+                >
+                  <option value="local">Local (LM Studio)</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+
+                <label className="field-label">Model name</label>
+                <input
+                  value={providerDefaultModel}
+                  onChange={(e) => setProviderDefaultModel(e.target.value)}
+                  className="control-input control-input-wide"
+                  placeholder={providerMode === "openrouter" ? "openai/gpt-4.1-mini" : "google/gemma-3-4b"}
+                />
+
+                {providerMode === "openrouter" && (
+                  <>
+                    <label className="field-label">OpenRouter API key</label>
+                    <input
+                      value={providerApiKey}
+                      onChange={(e) => setProviderApiKey(e.target.value)}
+                      className="control-input control-input-wide"
+                      placeholder="sk-or-v1-..."
+                      type="password"
+                    />
+                  </>
+                )}
+
+                <div className="row">
+                  <button className="primary" onClick={() => void saveSimpleProviderSettings()}>
+                    Save
+                  </button>
                 </div>
+                <p className="muted">Current backend key: {modelBackend || "(unset)"}</p>
               </div>
             </section>
           )}
