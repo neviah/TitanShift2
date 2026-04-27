@@ -55,10 +55,75 @@ type ChatMessage = {
   workflowMode?: string
 }
 
+type ChatSession = {
+  id: string
+  title: string
+  updatedAt: string
+  messages: ChatMessage[]
+}
+
+const CHAT_STORAGE_KEY = "titanshift-chat-sessions"
+
+function createChatId() {
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function buildChatTitle(prompt: string) {
+  const trimmed = prompt.trim().replace(/\s+/g, " ")
+  if (!trimmed) return "New chat"
+  return trimmed.length > 48 ? `${trimmed.slice(0, 48)}...` : trimmed
+}
+
+function sortChatSessions(sessions: ChatSession[]) {
+  return [...sessions].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+}
+
+function renderTabIcon(tab: Tab) {
+  if (tab === "chat") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 6.5h14v8H8l-3 3V6.5Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  if (tab === "tasks") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8 7h11M8 12h11M8 17h11M4 7h.01M4 12h.01M4 17h.01" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (tab === "workspaces") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3.5 7.5 12 4l8.5 3.5v9L12 20l-8.5-3.5v-9Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <path d="M3.5 7.5 12 11l8.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  if (tab === "scheduler") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M12 8v5l3 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 4.5 7 7v5l5 2.5 5-2.5V7l-5-2.5Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M12 14.5V19" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M18 8.5l2 1.2M4 9.7l2-1.2M16.2 17l1.4 2M6.4 19l1.4-2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function App() {
   const [tab, setTab] = useState<Tab>("chat")
   const [prompt, setPrompt] = useState("")
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
+  const [activeChatId, setActiveChatId] = useState("")
   const [activeRunId, setActiveRunId] = useState("")
   const [streaming, setStreaming] = useState(false)
   const [tasks, setTasks] = useState<TaskSummary[]>([])
@@ -88,9 +153,23 @@ export function App() {
   const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
   const latestSchedulerFailure = schedulerRuns.find((run) => run.status === "failed")
   const recentRuns = runs.slice(0, 5)
+  const activeChat = chatSessions.find((session) => session.id === activeChatId) ?? null
+  const chatMessages = activeChat?.messages ?? []
+  const mainPaneTab = tab === "tasks" ? "chat" : tab
 
   useEffect(() => {
-    // Load workspace history from localStorage
+    const savedChats = localStorage.getItem(CHAT_STORAGE_KEY)
+    if (savedChats) {
+      try {
+        const parsed = JSON.parse(savedChats) as ChatSession[]
+        const sorted = sortChatSessions(parsed)
+        setChatSessions(sorted)
+        setActiveChatId(sorted[0]?.id ?? "")
+      } catch {
+        // ignore parse error
+      }
+    }
+
     const savedHistory = localStorage.getItem("titanshift-workspace-history")
     if (savedHistory) {
       try {
@@ -102,6 +181,10 @@ export function App() {
     }
     void refreshAll()
   }, [])
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatSessions))
+  }, [chatSessions])
 
   // Poll health status every 10s
   useEffect(() => {
@@ -121,7 +204,7 @@ export function App() {
   useEffect(() => {
     if (!chatThreadRef.current) return
     chatThreadRef.current.scrollTop = chatThreadRef.current.scrollHeight
-  }, [chatMessages])
+  }, [chatMessages, activeChatId])
 
   async function refreshAll() {
     const [taskRows, runRows, workspace, config, providers, jobs, templates, stacks] = await Promise.all([
@@ -160,17 +243,45 @@ export function App() {
     const userPrompt = prompt.trim()
     if (!userPrompt || streaming) return
 
+    const sessionId = activeChatId || createChatId()
     const userMessageId = `u-${Date.now()}`
     const assistantMessageId = `a-${Date.now()}`
-    const updateAssistant = (updater: (message: ChatMessage) => ChatMessage) => {
-      setChatMessages((prev) => prev.map((msg) => (msg.id === assistantMessageId ? updater(msg) : msg)))
-    }
-
-    setChatMessages((prev) => [
-      ...prev,
+    const nextMessages: ChatMessage[] = [
+      ...chatMessages,
       { id: userMessageId, role: "user", content: userPrompt },
       { id: assistantMessageId, role: "assistant", content: "", pending: true, runStatus: "queued" },
-    ])
+    ]
+    const sessionTitle = activeChat?.title || buildChatTitle(userPrompt)
+
+    const writeChatSession = (messages: ChatMessage[]) => {
+      setChatSessions((prev) => {
+        const nextSession: ChatSession = {
+          id: sessionId,
+          title: sessionTitle,
+          updatedAt: new Date().toISOString(),
+          messages,
+        }
+        const existingIndex = prev.findIndex((session) => session.id === sessionId)
+        if (existingIndex === -1) {
+          return sortChatSessions([nextSession, ...prev])
+        }
+
+        const next = [...prev]
+        next[existingIndex] = nextSession
+        return sortChatSessions(next)
+      })
+    }
+
+    const updateAssistant = (updater: (message: ChatMessage) => ChatMessage) => {
+      writeChatSession(
+        (chatSessions.find((session) => session.id === sessionId)?.messages ?? nextMessages).map((msg) => (
+          msg.id === assistantMessageId ? updater(msg) : msg
+        )),
+      )
+    }
+
+    setActiveChatId(sessionId)
+    writeChatSession(nextMessages)
     setPrompt("")
 
     setStreaming(true)
@@ -246,6 +357,25 @@ export function App() {
     } finally {
       updateAssistant((msg) => ({ ...msg, pending: false, content: msg.content || "No response" }))
       setStreaming(false)
+    }
+  }
+
+  function createNewChat() {
+    setActiveChatId("")
+    setPrompt("")
+    setTab("chat")
+  }
+
+  function selectChatSession(sessionId: string) {
+    setActiveChatId(sessionId)
+    setTab("chat")
+  }
+
+  function deleteChatSession(sessionId: string) {
+    const remaining = chatSessions.filter((session) => session.id !== sessionId)
+    setChatSessions(remaining)
+    if (activeChatId === sessionId) {
+      setActiveChatId(remaining[0]?.id ?? "")
     }
   }
 
@@ -334,29 +464,182 @@ export function App() {
     }
   }
 
+  function chatSessionPreview(session: ChatSession) {
+    const lastMessage = [...session.messages].reverse().find((message) => message.content.trim())
+    return lastMessage?.content ?? "No messages yet"
+  }
+
   return (
     <div className="app-shell">
       <div className="layout">
         <aside className="sidebar">
           <div className="sidebar-topline">TitanShift</div>
           <div className="logo">TITANSHIFT</div>
-          <p className="muted">Control Surface</p>
-          {(["chat", "tasks", "workspaces", "scheduler", "settings"] as Tab[]).map((item) => (
-            <button
-              key={item}
-              onClick={() => setTab(item)}
-              className={`nav-button ${tab === item ? "active" : ""}`}
-            >
-              {item}
-            </button>
-          ))}
+          <div className="sidebar-nav-rail">
+            {(["chat", "tasks", "workspaces", "scheduler", "settings"] as Tab[]).map((item) => (
+              <button
+                key={item}
+                onClick={() => setTab(item)}
+                className={`nav-icon-button ${tab === item ? "active" : ""}`}
+                title={item}
+              >
+                <span className="nav-icon">{renderTabIcon(item)}</span>
+                <span className="nav-label">{item}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="sidebar-context-pane">
+            {tab === "chat" && (
+              <>
+                <div className="sidebar-context-header">
+                  <div>
+                    <div className="sidebar-context-kicker">Conversation shelf</div>
+                    <strong>Recent chats</strong>
+                  </div>
+                  <button className="primary sidebar-mini-action" onClick={createNewChat}>New Chat</button>
+                </div>
+
+                {chatSessions.length === 0 ? (
+                  <div className="sidebar-empty">No saved chats yet. Start one and it will stay here after refresh.</div>
+                ) : (
+                  <div className="sidebar-list">
+                    {chatSessions.map((session) => (
+                      <div key={session.id} className="sidebar-list-row">
+                        <button
+                          className={`sidebar-list-item ${activeChatId === session.id ? "active" : ""}`}
+                          onClick={() => selectChatSession(session.id)}
+                        >
+                          <span className="sidebar-item-title">{session.title}</span>
+                          <span className="sidebar-item-meta">{new Date(session.updatedAt).toLocaleString()}</span>
+                          <span className="sidebar-item-copy">{chatSessionPreview(session)}</span>
+                        </button>
+                        <button className="sidebar-icon-action" onClick={() => deleteChatSession(session.id)} title="Delete chat">
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {tab === "tasks" && (
+              <>
+                <div className="sidebar-context-header">
+                  <div>
+                    <div className="sidebar-context-kicker">Task shelf</div>
+                    <strong>Saved tasks</strong>
+                  </div>
+                  <button onClick={() => void refreshAll()} className="sidebar-mini-action">Refresh</button>
+                </div>
+
+                {tasks.length === 0 ? (
+                  <div className="sidebar-empty">No saved tasks returned by the bridge.</div>
+                ) : (
+                  <div className="sidebar-list">
+                    {tasks.map((task) => (
+                      <button
+                        key={task.task_id}
+                        className={`sidebar-list-item ${activeRunId === task.run_id ? "active" : ""}`}
+                        onClick={() => void inspectRun(task.run_id)}
+                      >
+                        <span className="sidebar-item-title">{task.task_id}</span>
+                        <span className="sidebar-item-meta">{task.status}</span>
+                        <span className="sidebar-item-copy">{task.description || task.run_id}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {tab === "workspaces" && (
+              <>
+                <div className="sidebar-context-header">
+                  <div>
+                    <div className="sidebar-context-kicker">Workspace shelf</div>
+                    <strong>Recent roots</strong>
+                  </div>
+                </div>
+                {workspaceHistory.length === 0 ? (
+                  <div className="sidebar-empty">Workspace shortcuts will appear here after you switch roots.</div>
+                ) : (
+                  <div className="sidebar-list">
+                    {workspaceHistory.map((path) => (
+                      <button
+                        key={path}
+                        className={`sidebar-list-item ${workspaceRoot === path ? "active" : ""}`}
+                        onClick={() => void switchWorkspace(path)}
+                      >
+                        <span className="sidebar-item-title">{workspaceRoot === path ? "Active root" : "Recent root"}</span>
+                        <span className="sidebar-item-copy">{path}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {tab === "scheduler" && (
+              <>
+                <div className="sidebar-context-header">
+                  <div>
+                    <div className="sidebar-context-kicker">Scheduler shelf</div>
+                    <strong>Runtime heartbeat</strong>
+                  </div>
+                </div>
+                <div className="sidebar-list">
+                  <div className="sidebar-stat-card">
+                    <span className="sidebar-item-title">Jobs</span>
+                    <span className="sidebar-item-copy">{schedulerJobs.length} configured</span>
+                  </div>
+                  <div className="sidebar-stat-card">
+                    <span className="sidebar-item-title">Task stacks</span>
+                    <span className="sidebar-item-copy">{taskStacks.length} configured</span>
+                  </div>
+                  <div className="sidebar-stat-card">
+                    <span className="sidebar-item-title">Latest failure</span>
+                    <span className="sidebar-item-copy">{latestSchedulerFailure?.task_id ?? "None"}</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {tab === "settings" && (
+              <>
+                <div className="sidebar-context-header">
+                  <div>
+                    <div className="sidebar-context-kicker">Settings shelf</div>
+                    <strong>Provider status</strong>
+                  </div>
+                </div>
+                <div className="sidebar-list">
+                  <div className="sidebar-stat-card">
+                    <span className="sidebar-item-title">Backend</span>
+                    <span className="sidebar-item-copy">{modelBackend || "unset"}</span>
+                  </div>
+                  <div className="sidebar-stat-card">
+                    <span className="sidebar-item-title">Model</span>
+                    <span className="sidebar-item-copy">{providerDefaultModel || "unset"}</span>
+                  </div>
+                  <div className="sidebar-stat-card">
+                    <span className="sidebar-item-title">OpenRouter key</span>
+                    <span className="sidebar-item-copy">{providerApiKey ? "configured" : "missing"}</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="sidebar-footer">Current run {selectedRun?.status ?? "idle"}</div>
         </aside>
 
         <main className="panel">
           <div className="panel-header">
             <div>
-              <div className="panel-kicker">TitanShift Panel</div>
-              <h1>{tab.charAt(0).toUpperCase() + tab.slice(1)}</h1>
+              <div className="panel-kicker">{tab === "tasks" ? "Task shelf / Chat canvas" : "TitanShift Panel"}</div>
+              <h1>{mainPaneTab.charAt(0).toUpperCase() + mainPaneTab.slice(1)}</h1>
             </div>
             <div className="panel-status">
               <span className="badge status-running">workspace</span>
@@ -374,12 +657,16 @@ export function App() {
             </div>
           </div>
 
-          {tab === "chat" && (
+          {mainPaneTab === "chat" && (
             <section className="chat-section">
               <div className="chat-window">
                 <div ref={chatThreadRef} className="chat-thread-unified">
                   {chatMessages.length === 0 && (
-                    <div className="chat-empty">Send a message to start a conversation.</div>
+                    <div className="chat-empty">
+                      {tab === "tasks"
+                        ? "Task shelf is open. Your active chat stays here in the main canvas."
+                        : "Send a message to start a conversation."}
+                    </div>
                   )}
                   {chatMessages.map((message) => (
                     <div
@@ -450,62 +737,7 @@ export function App() {
             </section>
           )}
 
-          {tab === "tasks" && (
-            <section>
-              <div className="section-grid">
-                <div className="control-card control-card-wide">
-                  <h2>Task Queue</h2>
-                  <p className="muted section-copy">Inspect current tasks and jump directly into run detail output.</p>
-              <div className="row">
-                <button onClick={() => void refreshAll()}>Refresh</button>
-              </div>
-              <div className="list">
-                {tasks.map((task) => (
-                  <div key={task.task_id} className="item">
-                    <div><strong>{task.task_id}</strong></div>
-                    <div className="muted">{task.description}</div>
-                    <div className="muted">run_id: {task.run_id}</div>
-                    <div>Status: {task.status}</div>
-                    <div className="row">
-                      <button className="warn" onClick={() => void cancelTask(task.task_id).then(refreshAll)}>
-                        Cancel
-                      </button>
-                      <button onClick={() => void inspectRun(task.run_id)}>Inspect Run</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-                </div>
-
-                <div className="control-card control-card-wide">
-              <h3 style={{ marginTop: 14 }}>Recent runs</h3>
-              <div className="list">
-                {runs.slice(0, 10).map((run) => (
-                  <div key={run.run_id} className="item">
-                    <div><strong>{run.run_id}</strong></div>
-                    <div className="muted">task: {run.task_id}</div>
-                    <div className="muted">{run.description}</div>
-                    <div className={`badge ${statusClass(run.status)}`}>{run.status}</div>
-                    {run.error && <div className="badge status-failed">error: {run.error}</div>}
-                    <div className="row">
-                      <button onClick={() => void inspectRun(run.run_id)}>Inspect</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-                </div>
-
-              {selectedRun && (
-                <div className="control-card control-card-wide">
-                  <h3>Run detail</h3>
-                  <div className="chat-log">{JSON.stringify(selectedRun.output, null, 2)}</div>
-                </div>
-              )}
-              </div>
-            </section>
-          )}
-
-          {tab === "workspaces" && (
+          {mainPaneTab === "workspaces" && (
             <section className="section-grid">
               <div className="control-card control-card-wide">
               <h2>Workspace Targeting</h2>
@@ -561,7 +793,7 @@ export function App() {
             </section>
           )}
 
-          {tab === "scheduler" && (
+          {mainPaneTab === "scheduler" && (
             <section className="section-grid">
               <div className="control-card control-card-wide">
               <h2>Scheduler Control</h2>
@@ -730,7 +962,7 @@ export function App() {
             </section>
           )}
 
-          {tab === "settings" && (
+          {mainPaneTab === "settings" && (
             <section className="section-grid settings-grid">
               <div className="control-card control-card-wide">
                 <h2>Settings</h2>
