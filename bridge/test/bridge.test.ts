@@ -405,6 +405,18 @@ describe("bridge api", () => {
         },
       })
 
+      await app1.inject({
+        method: "POST",
+        url: "/config",
+        payload: { key: "model.default_backend", value: "openai/gpt-4.1" },
+      })
+
+      await app1.inject({
+        method: "POST",
+        url: "/config",
+        payload: { key: "provider.default_model", value: "openai/gpt-4.1" },
+      })
+
       await app1.close()
 
       const app2 = buildServer()
@@ -413,14 +425,18 @@ describe("bridge api", () => {
       const jobs = await app2.inject({ method: "GET", url: "/scheduler/jobs" })
       const templates = await app2.inject({ method: "GET", url: "/scheduler/template-jobs" })
       const stacks = await app2.inject({ method: "GET", url: "/scheduler/task-stacks" })
+      const config = await app2.inject({ method: "GET", url: "/config" })
 
       expect(jobs.statusCode).toBe(200)
       expect(templates.statusCode).toBe(200)
       expect(stacks.statusCode).toBe(200)
+      expect(config.statusCode).toBe(200)
 
       expect(jobs.json().length).toBe(1)
       expect(templates.json().length).toBe(1)
       expect(stacks.json().length).toBe(1)
+      expect(config.json()["model.default_backend"]).toBe("openai/gpt-4.1")
+      expect(config.json()["provider.default_model"]).toBe("openai/gpt-4.1")
 
       await app2.close()
     } finally {

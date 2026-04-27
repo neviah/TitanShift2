@@ -65,6 +65,7 @@ export function App() {
   const [taskStackInput, setTaskStackInput] = useState("task-1,task-2")
   const [tickSummary, setTickSummary] = useState("")
   const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
+  const latestSchedulerFailure = schedulerRuns.find((run) => run.status === "failed")
 
   useEffect(() => {
     void refreshAll()
@@ -172,6 +173,13 @@ export function App() {
     if (status === "running") return "status-running"
     if (status === "cancelled") return "status-cancelled"
     return "status-queued"
+  }
+
+  function formatTimestamp(value: string | null) {
+    if (!value) return "-"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleString()
   }
 
   return (
@@ -324,12 +332,22 @@ export function App() {
               <p className="muted">{tickSummary}</p>
 
               <h3>Latest run activity</h3>
+              <div className="row" style={{ marginBottom: 8 }}>
+                <button
+                  onClick={() => latestSchedulerFailure && void inspectRun(latestSchedulerFailure.run_id)}
+                  disabled={!latestSchedulerFailure}
+                >
+                  Inspect latest failure
+                </button>
+              </div>
               <div className="list">
                 {schedulerRuns.slice(0, 8).map((run) => (
-                  <div key={`sched-${run.run_id}`} className="item">
+                  <div key={`sched-${run.run_id}`} className="item timeline-item">
                     <div><strong>{run.run_id}</strong></div>
                     <div className="muted">task: {run.task_id}</div>
                     <div className="muted">{run.description}</div>
+                    <div className="muted">created: {formatTimestamp(run.created_at)}</div>
+                    <div className="muted">completed: {formatTimestamp(run.completed_at)}</div>
                     <div className={`badge ${statusClass(run.status)}`}>{run.status}</div>
                     {run.error && <div className="badge status-failed">error: {run.error}</div>}
                     <div className="row">

@@ -97,13 +97,13 @@ export function buildServer() {
   const schedulerTaskStacks = new Map<string, SchedulerTaskStackJob>()
   const schedulerStateFile = resolveSchedulerStateFile()
 
-  hydrateSchedulerState()
-
   let activeWorkspaceRoot = process.cwd()
   let settings: RuntimeSettings = {
     model_default_backend: "opencode/default",
     provider_default_model: "opencode/default",
   }
+
+  hydrateSchedulerState()
 
   const adapter = new OpenCodeHttpAdapter(process.env.OPENCODE_BASE_URL ?? "http://127.0.0.1:4096")
 
@@ -346,6 +346,8 @@ export function buildServer() {
     if (parsed.data.key === "provider.default_model" && typeof parsed.data.value === "string") {
       settings.provider_default_model = parsed.data.value
     }
+
+    persistSchedulerState()
 
     return { ok: true, key: parsed.data.key, value: parsed.data.value }
   })
@@ -651,9 +653,19 @@ export function buildServer() {
     try {
       const raw = readFileSync(schedulerStateFile, "utf-8")
       const parsed = JSON.parse(raw) as {
+        settings?: RuntimeSettings
         jobs?: SchedulerJob[]
         template_jobs?: SchedulerTemplateJob[]
         task_stacks?: SchedulerTaskStackJob[]
+      }
+
+      if (parsed.settings) {
+        if (typeof parsed.settings.model_default_backend === "string") {
+          settings.model_default_backend = parsed.settings.model_default_backend
+        }
+        if (typeof parsed.settings.provider_default_model === "string") {
+          settings.provider_default_model = parsed.settings.provider_default_model
+        }
       }
 
       schedulerStore.replaceAll(Array.isArray(parsed.jobs) ? parsed.jobs : [])
@@ -680,6 +692,7 @@ export function buildServer() {
         schedulerStateFile,
         JSON.stringify(
           {
+            settings,
             jobs: schedulerStore.list(),
             template_jobs: [...schedulerTemplateJobs.values()].sort((a, b) => a.job_id.localeCompare(b.job_id)),
             task_stacks: [...schedulerTaskStacks.values()].sort((a, b) => a.job_id.localeCompare(b.job_id)),

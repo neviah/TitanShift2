@@ -10,7 +10,7 @@ Compatibility shim that preserves TitanShift UI-facing API behavior while delega
 - Workspace root switching implemented and enforced on adapter calls.
 - Scheduler create/list/run/delete and tick endpoints implemented.
 - TitanShift-compatible scheduler template-jobs and task-stacks endpoints implemented.
-- Scheduler definitions persist across restarts via disk-backed state.
+- Scheduler definitions and runtime settings persist across restarts via disk-backed state.
 - Settings flow for model/provider defaults implemented.
 - Reliability guardrails added at adapter execution boundary.
 
@@ -42,7 +42,7 @@ Run it with:
 
 - OPENCODE_BASE_URL: OpenCode server base URL. Default: http://127.0.0.1:4096
 - PORT: Bridge API port. Default: 8000
-- SCHEDULER_STATE_FILE: Optional path for persisted scheduler state JSON. Defaults to `.titanshift/scheduler-state.json`.
+- SCHEDULER_STATE_FILE: Optional path for persisted scheduler and runtime settings JSON. Defaults to `.titanshift/scheduler-state.json`.
 
 ## API (implemented now)
 
