@@ -3,6 +3,13 @@ import type { SchedulerJob } from "../types.js"
 export class SchedulerStore {
   private jobs = new Map<string, SchedulerJob>()
 
+  replaceAll(jobs: SchedulerJob[]): void {
+    this.jobs.clear()
+    for (const job of jobs) {
+      this.jobs.set(job.job_id, job)
+    }
+  }
+
   create(job: SchedulerJob): SchedulerJob {
     this.jobs.set(job.job_id, job)
     return job

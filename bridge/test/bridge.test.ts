@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
+import { existsSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { randomUUID } from "node:crypto"
 import { buildServer } from "../src/server.js"
 import * as adapterModule from "../src/adapters/opencodeAdapter.js"
 
@@ -359,5 +363,76 @@ describe("bridge api", () => {
     expect(detailBody.status).toBe("completed")
 
     await app.close()
+  })
+
+  it("persists scheduler definitions across server restarts", async () => {
+    const stateFile = join(tmpdir(), `titanshift-scheduler-${randomUUID()}.json`)
+    const previousStateFile = process.env.SCHEDULER_STATE_FILE
+    process.env.SCHEDULER_STATE_FILE = stateFile
+
+    try {
+      const app1 = buildServer()
+      await app1.ready()
+
+      await app1.inject({
+        method: "POST",
+        url: "/scheduler/jobs",
+        payload: {
+          description: "Persisted primary",
+          schedule_type: "interval",
+          interval_seconds: 60,
+          task_prompt: "persist job",
+        },
+      })
+
+      await app1.inject({
+        method: "POST",
+        url: "/scheduler/template-jobs",
+        payload: {
+          template_id: "persist-template",
+          schedule_type: "interval",
+          interval_seconds: 120,
+        },
+      })
+
+      await app1.inject({
+        method: "POST",
+        url: "/scheduler/task-stacks",
+        payload: {
+          task_ids: ["task-a", "task-b"],
+          schedule_type: "cron",
+          cron: "*/5 * * * *",
+        },
+      })
+
+      await app1.close()
+
+      const app2 = buildServer()
+      await app2.ready()
+
+      const jobs = await app2.inject({ method: "GET", url: "/scheduler/jobs" })
+      const templates = await app2.inject({ method: "GET", url: "/scheduler/template-jobs" })
+      const stacks = await app2.inject({ method: "GET", url: "/scheduler/task-stacks" })
+
+      expect(jobs.statusCode).toBe(200)
+      expect(templates.statusCode).toBe(200)
+      expect(stacks.statusCode).toBe(200)
+
+      expect(jobs.json().length).toBe(1)
+      expect(templates.json().length).toBe(1)
+      expect(stacks.json().length).toBe(1)
+
+      await app2.close()
+    } finally {
+      if (previousStateFile === undefined) {
+        delete process.env.SCHEDULER_STATE_FILE
+      } else {
+        process.env.SCHEDULER_STATE_FILE = previousStateFile
+      }
+
+      if (existsSync(stateFile)) {
+        rmSync(stateFile)
+      }
+    }
   })
 })

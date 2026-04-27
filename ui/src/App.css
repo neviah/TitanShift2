@@ -142,6 +142,46 @@ button.warn {
   white-space: pre-wrap;
 }
 
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  width: fit-content;
+  border: 1px solid transparent;
+}
+
+.status-completed {
+  background: #e8f8ef;
+  color: #146c43;
+  border-color: #7ec89c;
+}
+
+.status-failed {
+  background: #fdeceb;
+  color: #8b1a1a;
+  border-color: #e1a3a0;
+}
+
+.status-running {
+  background: #e7f4fd;
+  color: #0a4f74;
+  border-color: #8ac3e2;
+}
+
+.status-cancelled {
+  background: #f2edf8;
+  color: #56308c;
+  border-color: #c7b4e6;
+}
+
+.status-queued {
+  background: #fbf4e9;
+  color: #8b4e0f;
+  border-color: #e2be89;
+}
+
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;

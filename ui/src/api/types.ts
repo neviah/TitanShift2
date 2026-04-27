@@ -64,6 +64,7 @@ export type SchedulerTickResponse = {
 export type RunSummary = {
   run_id: string
   task_id: string
+  description: string
   status: string
   created_at: string
   completed_at: string | null

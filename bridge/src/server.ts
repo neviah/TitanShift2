@@ -1,5 +1,7 @@
 import Fastify from "fastify"
 import { randomUUID } from "node:crypto"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { z } from "zod"
 import { OpenCodeHttpAdapter } from "./adapters/opencodeAdapter.js"
 import { TaskStore } from "./store/taskStore.js"
@@ -7,6 +9,7 @@ import { SchedulerStore } from "./store/schedulerStore.js"
 import type {
   ChatRequest,
   RuntimeSettings,
+  SchedulerJob,
   SchedulerTaskStackJob,
   SchedulerTemplateJob,
   SchedulerTickResult,
@@ -92,6 +95,9 @@ export function buildServer() {
   const schedulerStore = new SchedulerStore()
   const schedulerTemplateJobs = new Map<string, SchedulerTemplateJob>()
   const schedulerTaskStacks = new Map<string, SchedulerTaskStackJob>()
+  const schedulerStateFile = resolveSchedulerStateFile()
+
+  hydrateSchedulerState()
 
   let activeWorkspaceRoot = process.cwd()
   let settings: RuntimeSettings = {
@@ -158,6 +164,7 @@ export function buildServer() {
     return taskStore.list().map((task) => ({
       run_id: task.run_id,
       task_id: task.task_id,
+      description: task.description,
       status: task.status,
       created_at: task.created_at,
       completed_at: task.completed_at ?? null,
@@ -366,11 +373,13 @@ export function buildServer() {
       model_backend: body.model_backend,
       workflow_mode: body.workflow_mode,
     })
+    persistSchedulerState()
     return { ok: true, job_id: job.job_id }
   })
 
   app.delete<{ Params: { job_id: string } }>("/scheduler/jobs/:job_id", async (req) => {
     const deleted = schedulerStore.delete(req.params.job_id)
+    if (deleted) persistSchedulerState()
     return { ok: true, job_id: req.params.job_id, deleted }
   })
 
@@ -397,12 +406,14 @@ export function buildServer() {
       timeout_s: body.timeout_s,
       max_failures: body.max_failures ?? 3,
     })
+    persistSchedulerState()
 
     return { ok: true, job_id: jobId, template_id: body.template_id }
   })
 
   app.delete<{ Params: { job_id: string } }>("/scheduler/template-jobs/:job_id", async (req) => {
     const deleted = schedulerTemplateJobs.delete(req.params.job_id)
+    if (deleted) persistSchedulerState()
     return { ok: true, job_id: req.params.job_id, deleted }
   })
 
@@ -419,6 +430,7 @@ export function buildServer() {
 
     const next = { ...row, enabled: parsed.data.enabled }
     schedulerTemplateJobs.set(req.params.job_id, next)
+    persistSchedulerState()
     return { job_id: next.job_id, enabled: next.enabled }
   })
 
@@ -458,12 +470,14 @@ export function buildServer() {
       workflow_mode: body.workflow_mode,
       budget: body.budget,
     })
+    persistSchedulerState()
 
     return { ok: true, job_id: jobId, task_count: body.task_ids.length }
   })
 
   app.delete<{ Params: { job_id: string } }>("/scheduler/task-stacks/:job_id", async (req) => {
     const deleted = schedulerTaskStacks.delete(req.params.job_id)
+    if (deleted) persistSchedulerState()
     return { ok: true, job_id: req.params.job_id, deleted }
   })
 
@@ -480,6 +494,7 @@ export function buildServer() {
 
     const next = { ...row, enabled: parsed.data.enabled }
     schedulerTaskStacks.set(req.params.job_id, next)
+    persistSchedulerState()
     return { job_id: next.job_id, enabled: next.enabled }
   })
 
@@ -504,6 +519,7 @@ export function buildServer() {
       return reply.code(404).send({ ok: false, error: "job_not_found" })
     }
 
+    persistSchedulerState()
     return { job_id: updated.job_id, enabled: updated.enabled }
   })
 
@@ -612,8 +628,70 @@ export function buildServer() {
       last_run_at: new Date().toISOString(),
       last_task_id: taskId,
     })
+    persistSchedulerState()
 
     return { task_id: taskId, run_id: runId }
+  }
+
+  function resolveSchedulerStateFile(): string | null {
+    if (process.env.SCHEDULER_STATE_FILE) {
+      return process.env.SCHEDULER_STATE_FILE
+    }
+
+    if (process.env.NODE_ENV === "test" || process.env.VITEST === "true") {
+      return null
+    }
+
+    return join(process.cwd(), ".titanshift", "scheduler-state.json")
+  }
+
+  function hydrateSchedulerState() {
+    if (!schedulerStateFile || !existsSync(schedulerStateFile)) return
+
+    try {
+      const raw = readFileSync(schedulerStateFile, "utf-8")
+      const parsed = JSON.parse(raw) as {
+        jobs?: SchedulerJob[]
+        template_jobs?: SchedulerTemplateJob[]
+        task_stacks?: SchedulerTaskStackJob[]
+      }
+
+      schedulerStore.replaceAll(Array.isArray(parsed.jobs) ? parsed.jobs : [])
+      schedulerTemplateJobs.clear()
+      schedulerTaskStacks.clear()
+
+      for (const job of Array.isArray(parsed.template_jobs) ? parsed.template_jobs : []) {
+        schedulerTemplateJobs.set(job.job_id, job)
+      }
+      for (const job of Array.isArray(parsed.task_stacks) ? parsed.task_stacks : []) {
+        schedulerTaskStacks.set(job.job_id, job)
+      }
+    } catch (error) {
+      app.log.warn({ error }, "failed_to_hydrate_scheduler_state")
+    }
+  }
+
+  function persistSchedulerState() {
+    if (!schedulerStateFile) return
+
+    try {
+      mkdirSync(dirname(schedulerStateFile), { recursive: true })
+      writeFileSync(
+        schedulerStateFile,
+        JSON.stringify(
+          {
+            jobs: schedulerStore.list(),
+            template_jobs: [...schedulerTemplateJobs.values()].sort((a, b) => a.job_id.localeCompare(b.job_id)),
+            task_stacks: [...schedulerTaskStacks.values()].sort((a, b) => a.job_id.localeCompare(b.job_id)),
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      )
+    } catch (error) {
+      app.log.warn({ error }, "failed_to_persist_scheduler_state")
+    }
   }
 
   async function executeChatTask(payload: ChatRequest) {

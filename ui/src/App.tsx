@@ -64,6 +64,7 @@ export function App() {
   const [templateId, setTemplateId] = useState("template-default")
   const [taskStackInput, setTaskStackInput] = useState("task-1,task-2")
   const [tickSummary, setTickSummary] = useState("")
+  const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
 
   useEffect(() => {
     void refreshAll()
@@ -165,6 +166,14 @@ export function App() {
     await refreshAll()
   }
 
+  function statusClass(status: string) {
+    if (status === "completed") return "status-completed"
+    if (status === "failed") return "status-failed"
+    if (status === "running") return "status-running"
+    if (status === "cancelled") return "status-cancelled"
+    return "status-queued"
+  }
+
   return (
     <div className="app-shell">
       <div className="layout">
@@ -251,7 +260,9 @@ export function App() {
                   <div key={run.run_id} className="item">
                     <div><strong>{run.run_id}</strong></div>
                     <div className="muted">task: {run.task_id}</div>
-                    <div>Status: {run.status}</div>
+                    <div className="muted">{run.description}</div>
+                    <div className={`badge ${statusClass(run.status)}`}>{run.status}</div>
+                    {run.error && <div className="badge status-failed">error: {run.error}</div>}
                     <div className="row">
                       <button onClick={() => void inspectRun(run.run_id)}>Inspect</button>
                     </div>
@@ -314,16 +325,19 @@ export function App() {
 
               <h3>Latest run activity</h3>
               <div className="list">
-                {runs.slice(0, 5).map((run) => (
+                {schedulerRuns.slice(0, 8).map((run) => (
                   <div key={`sched-${run.run_id}`} className="item">
                     <div><strong>{run.run_id}</strong></div>
                     <div className="muted">task: {run.task_id}</div>
-                    <div>Status: {run.status}</div>
+                    <div className="muted">{run.description}</div>
+                    <div className={`badge ${statusClass(run.status)}`}>{run.status}</div>
+                    {run.error && <div className="badge status-failed">error: {run.error}</div>}
                     <div className="row">
                       <button onClick={() => void inspectRun(run.run_id)}>Inspect</button>
                     </div>
                   </div>
                 ))}
+                {schedulerRuns.length === 0 && <div className="muted">No scheduler-origin runs yet.</div>}
               </div>
 
               <h3>Jobs</h3>
