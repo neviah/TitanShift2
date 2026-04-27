@@ -132,6 +132,7 @@ export function App() {
   const [prompt, setPrompt] = useState("")
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const [activeChatId, setActiveChatId] = useState("")
+  const [storageHydrated, setStorageHydrated] = useState(false)
   const [taskShelfState, setTaskShelfState] = useState<TaskShelfState>(EMPTY_TASK_SHELF)
   const [activeRunId, setActiveRunId] = useState("")
   const [streaming, setStreaming] = useState(false)
@@ -205,23 +206,40 @@ export function App() {
       }
     }
     void refreshAll()
+    setStorageHydrated(true)
   }, [])
 
   useEffect(() => {
+    if (!storageHydrated) return
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatSessions))
-  }, [chatSessions])
+  }, [chatSessions, storageHydrated])
 
   useEffect(() => {
+    if (!storageHydrated) return
     if (activeChatId) {
       localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, activeChatId)
       return
     }
     localStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY)
-  }, [activeChatId])
+  }, [activeChatId, storageHydrated])
 
   useEffect(() => {
+    if (!storageHydrated) return
     localStorage.setItem(TASK_SHELF_STORAGE_KEY, JSON.stringify(taskShelfState))
-  }, [taskShelfState])
+  }, [taskShelfState, storageHydrated])
+
+  useEffect(() => {
+    if (!storageHydrated) return
+    if (chatSessions.length === 0) {
+      if (activeChatId) setActiveChatId("")
+      return
+    }
+
+    const hasActive = chatSessions.some((session) => session.id === activeChatId)
+    if (!hasActive) {
+      setActiveChatId(chatSessions[0].id)
+    }
+  }, [chatSessions, activeChatId, storageHydrated])
 
   // Poll health status every 10s
   useEffect(() => {
