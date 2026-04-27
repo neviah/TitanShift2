@@ -59,6 +59,7 @@ export function App() {
   const [modelBackend, setModelBackend] = useState("")
   const [providerDefaultModel, setProviderDefaultModel] = useState("")
   const [providerOptions, setProviderOptions] = useState<Array<{ id: string; name: string }>>([])
+  const [providerDefaults, setProviderDefaults] = useState<Record<string, string>>({})
   const [selectedProvider, setSelectedProvider] = useState("")
   const [schedulerPrompt, setSchedulerPrompt] = useState("Say hello from scheduler")
   const [templateId, setTemplateId] = useState("template-default")
@@ -89,6 +90,7 @@ export function App() {
     setModelBackend(String(config["model.default_backend"] ?? ""))
     setProviderDefaultModel(String(config["provider.default_model"] ?? ""))
     setProviderOptions(providers.providers)
+    setProviderDefaults(providers.default)
     if (providers.providers.length > 0 && !selectedProvider) {
       setSelectedProvider(providers.providers[0].id)
     }
@@ -161,9 +163,10 @@ export function App() {
 
   async function applyProviderDefault() {
     if (!selectedProvider) return
-    const composed = `${selectedProvider}/${providerDefaultModel || "default"}`
-    setProviderDefaultModel(composed)
-    await updateConfig("provider.default_model", composed)
+    const providerDefault = providerDefaults[selectedProvider]
+    if (!providerDefault) return
+    setProviderDefaultModel(providerDefault)
+    await updateConfig("provider.default_model", providerDefault)
     await refreshAll()
   }
 
@@ -446,8 +449,16 @@ export function App() {
                   style={{ minWidth: 320 }}
                 />
                 <button onClick={() => void saveProviderModel()}>Save provider.default_model</button>
-                <button onClick={() => void applyProviderDefault()}>Apply provider + model</button>
+                <button
+                  onClick={() => void applyProviderDefault()}
+                  disabled={!selectedProvider || !providerDefaults[selectedProvider]}
+                >
+                  Use provider default
+                </button>
               </div>
+              <p className="muted">
+                Selected provider default: {selectedProvider ? providerDefaults[selectedProvider] || "(none)" : "(select a provider)"}
+              </p>
             </section>
           )}
         </main>

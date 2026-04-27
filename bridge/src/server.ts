@@ -1,7 +1,7 @@
 import Fastify from "fastify"
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { z } from "zod"
 import { OpenCodeHttpAdapter } from "./adapters/opencodeAdapter.js"
 import { TaskStore } from "./store/taskStore.js"
@@ -320,7 +320,14 @@ export function buildServer() {
     if (!path || typeof path !== "string") {
       return reply.code(400).send({ detail: "path is required" })
     }
-    activeWorkspaceRoot = path
+
+    const resolved = resolve(path)
+    if (!isExistingDirectory(resolved)) {
+      return reply.code(400).send({ detail: "path must be an existing directory" })
+    }
+
+    activeWorkspaceRoot = resolved
+    persistSchedulerState()
     return { root: activeWorkspaceRoot }
   })
 
@@ -654,9 +661,14 @@ export function buildServer() {
       const raw = readFileSync(schedulerStateFile, "utf-8")
       const parsed = JSON.parse(raw) as {
         settings?: RuntimeSettings
+        workspace_root?: string
         jobs?: SchedulerJob[]
         template_jobs?: SchedulerTemplateJob[]
         task_stacks?: SchedulerTaskStackJob[]
+      }
+
+      if (typeof parsed.workspace_root === "string" && isExistingDirectory(parsed.workspace_root)) {
+        activeWorkspaceRoot = parsed.workspace_root
       }
 
       if (parsed.settings) {
@@ -693,6 +705,7 @@ export function buildServer() {
         JSON.stringify(
           {
             settings,
+            workspace_root: activeWorkspaceRoot,
             jobs: schedulerStore.list(),
             template_jobs: [...schedulerTemplateJobs.values()].sort((a, b) => a.job_id.localeCompare(b.job_id)),
             task_stacks: [...schedulerTaskStacks.values()].sort((a, b) => a.job_id.localeCompare(b.job_id)),
@@ -704,6 +717,15 @@ export function buildServer() {
       )
     } catch (error) {
       app.log.warn({ error }, "failed_to_persist_scheduler_state")
+    }
+  }
+
+  function isExistingDirectory(path: string): boolean {
+    if (!existsSync(path)) return false
+    try {
+      return statSync(path).isDirectory()
+    } catch {
+      return false
     }
   }
 

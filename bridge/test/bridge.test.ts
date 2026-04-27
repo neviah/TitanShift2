@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { existsSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import { randomUUID } from "node:crypto"
 import { buildServer } from "../src/server.js"
 import * as adapterModule from "../src/adapters/opencodeAdapter.js"
@@ -95,7 +95,7 @@ describe("bridge api", () => {
 
     await app.inject({ method: "POST", url: "/chat", payload: { prompt: "hello" } })
     const firstCall = runChat.mock.calls[0]?.[0]
-    expect(firstCall.workspaceRoot).toBe("D:/Projects/TitanShiftV2/opencode-upstream")
+    expect(firstCall.workspaceRoot).toBe(resolve("D:/Projects/TitanShiftV2/opencode-upstream"))
 
     await app.close()
   })
@@ -417,6 +417,13 @@ describe("bridge api", () => {
         payload: { key: "provider.default_model", value: "openai/gpt-4.1" },
       })
 
+      const setRoot = await app1.inject({
+        method: "POST",
+        url: "/workspace/set-root",
+        payload: { path: tmpdir() },
+      })
+      expect(setRoot.statusCode).toBe(200)
+
       await app1.close()
 
       const app2 = buildServer()
@@ -426,17 +433,20 @@ describe("bridge api", () => {
       const templates = await app2.inject({ method: "GET", url: "/scheduler/template-jobs" })
       const stacks = await app2.inject({ method: "GET", url: "/scheduler/task-stacks" })
       const config = await app2.inject({ method: "GET", url: "/config" })
+      const workspace = await app2.inject({ method: "GET", url: "/workspace/info" })
 
       expect(jobs.statusCode).toBe(200)
       expect(templates.statusCode).toBe(200)
       expect(stacks.statusCode).toBe(200)
       expect(config.statusCode).toBe(200)
+      expect(workspace.statusCode).toBe(200)
 
       expect(jobs.json().length).toBe(1)
       expect(templates.json().length).toBe(1)
       expect(stacks.json().length).toBe(1)
       expect(config.json()["model.default_backend"]).toBe("openai/gpt-4.1")
       expect(config.json()["provider.default_model"]).toBe("openai/gpt-4.1")
+      expect(workspace.json().root).toBe(resolve(tmpdir()))
 
       await app2.close()
     } finally {
