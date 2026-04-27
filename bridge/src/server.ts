@@ -261,6 +261,8 @@ export function buildServer() {
         const orAdapter = buildOpenRouterAdapter(payload)
         result = await orAdapter.streamChat(payload.prompt, (chunk) => {
           streamEvent({ type: "text_delta", delta: chunk })
+        }, (reasoning) => {
+          streamEvent({ type: "reasoning_delta", delta: reasoning })
         })
       } else {
         result = await withTimeout(

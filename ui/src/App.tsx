@@ -48,6 +48,7 @@ type ChatMessage = {
   id: string
   role: "user" | "assistant"
   content: string
+  thinking?: string
   pending?: boolean
   runId?: string
   runStatus?: "queued" | "running" | "completed" | "failed" | "cancelled"
@@ -193,6 +194,13 @@ export function App() {
           const chunk = typeof event.delta === "string" ? event.delta : typeof event.text === "string" ? event.text : ""
           if (!chunk) return
           updateAssistant((msg) => ({ ...msg, content: `${msg.content}${chunk}` }))
+          return
+        }
+
+        if (event.type === "reasoning_delta") {
+          const chunk = typeof event.delta === "string" ? event.delta : typeof event.text === "string" ? event.text : ""
+          if (!chunk) return
+          updateAssistant((msg) => ({ ...msg, thinking: `${msg.thinking ?? ""}${chunk}` }))
           return
         }
 
@@ -367,57 +375,77 @@ export function App() {
           </div>
 
           {tab === "chat" && (
-            <section className="section-grid two-up">
-              <div className="control-card control-card-wide">
-                <h2>Chat</h2>
-                <p className="muted section-copy">One conversation window. Responses stream directly into the same thread.</p>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={handlePromptKeyDown}
-                rows={4}
-                className="control-input prompt-area"
-                placeholder="Type your request..."
-              />
-              <div className="row">
-                <button className="primary" onClick={() => void handleSendChat()} disabled={streaming || !prompt.trim()}>
-                  {streaming ? "Sending..." : "Send"}
-                </button>
-              </div>
-              </div>
-
-              <div className="control-card">
-                <h3>Active run</h3>
-                <div className="metric-line"><strong>run_id:</strong> {activeRunId || "none"}</div>
-                {selectedRun ? (
-                  <div className="stack">
-                    <div className="metric-line"><strong>status:</strong> {selectedRun.status}</div>
-                    <div className="metric-line"><strong>task_id:</strong> {selectedRun.task_id}</div>
-                    <div className="metric-line"><strong>success:</strong> {String(selectedRun.success)}</div>
-                  </div>
-                ) : (
-                  <div className="muted">No run selected.</div>
-                )}
-              </div>
-
-              <div className="control-card">
-              <h3>Conversation</h3>
-              <div ref={chatThreadRef} className="chat-thread">
-                {chatMessages.length === 0 && <div className="muted">No messages yet.</div>}
-                {chatMessages.map((message) => (
-                  <div key={message.id} className={`chat-bubble ${message.role === "user" ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
-                    <div className="chat-role">{message.role === "user" ? "You" : "TitanShift"}</div>
-                    <div className="chat-content">{message.content || (message.pending ? "..." : "No response")}</div>
-                    {message.role === "assistant" && (message.runId || message.runStatus || message.workflowMode) && (
-                      <div className="chat-meta-row">
-                        {message.runStatus && <span className={`badge ${statusClass(message.runStatus)}`}>{message.runStatus}</span>}
-                        {message.workflowMode && <span className="badge status-queued">{message.workflowMode}</span>}
-                        {message.runId && <span className="badge status-cancelled">run {message.runId.slice(0, 8)}</span>}
+            <section className="chat-section">
+              <div className="chat-window">
+                <div ref={chatThreadRef} className="chat-thread-unified">
+                  {chatMessages.length === 0 && (
+                    <div className="chat-empty">Send a message to start a conversation.</div>
+                  )}
+                  {chatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`chat-msg ${message.role === "user" ? "chat-msg-user" : "chat-msg-ai"}`}
+                    >
+                      <div className="chat-msg-role">
+                        {message.role === "user" ? "You" : "TitanShift"}
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+
+                      {/* Collapsible thinking/reasoning block — shown for AI messages only */}
+                      {message.role === "assistant" && message.thinking && (
+                        <details className="thinking-block">
+                          <summary className="thinking-summary">
+                            {message.runStatus === "running" ? "Thinking…" : "Reasoning"}
+                          </summary>
+                          <pre className="thinking-content">{message.thinking}</pre>
+                        </details>
+                      )}
+
+                      <div className="chat-msg-content">
+                        {message.content || (message.pending && !message.thinking ? (
+                          <span className="chat-pending-dots">
+                            <span />
+                            <span />
+                            <span />
+                          </span>
+                        ) : null)}
+                      </div>
+
+                      {message.role === "assistant" && (message.runId || message.runStatus) && (
+                        <div className="chat-meta-row">
+                          {message.runStatus && (
+                            <span className={`badge ${statusClass(message.runStatus)}`}>{message.runStatus}</span>
+                          )}
+                          {message.workflowMode && (
+                            <span className="badge status-queued">{message.workflowMode}</span>
+                          )}
+                          {message.runId && (
+                            <span className="badge status-cancelled" title={message.runId}>
+                              run {message.runId.slice(0, 8)}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="chat-input-dock">
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    onKeyDown={handlePromptKeyDown}
+                    rows={3}
+                    className="chat-input-area"
+                    placeholder="Type your message… (Enter to send, Shift+Enter for newline)"
+                  />
+                  <button
+                    className="primary chat-send-btn"
+                    onClick={() => void handleSendChat()}
+                    disabled={streaming || !prompt.trim()}
+                  >
+                    {streaming ? "…" : "Send"}
+                  </button>
+                </div>
               </div>
             </section>
           )}

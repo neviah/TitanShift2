@@ -79,6 +79,7 @@ export class OpenRouterDirectAdapter {
   async streamChat(
     prompt: string,
     onChunk: (text: string) => void,
+    onReasoning?: (text: string) => void,
   ): Promise<OpenRouterAdapterResult> {
     const response = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
       method: "POST",
@@ -127,10 +128,14 @@ export class OpenRouterDirectAdapter {
 
         try {
           const chunk = JSON.parse(raw) as {
-            choices?: Array<{ delta?: { content?: string } }>
+            choices?: Array<{ delta?: { content?: string; reasoning?: string } }>
             model?: string
           }
           if (chunk.model) resolvedModel = chunk.model
+          const reasoning = chunk.choices?.[0]?.delta?.reasoning ?? ""
+          if (reasoning && onReasoning) {
+            onReasoning(reasoning)
+          }
           const delta = chunk.choices?.[0]?.delta?.content ?? ""
           if (delta) {
             fullText += delta
