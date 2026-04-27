@@ -33,6 +33,10 @@ export class OpenCodeHttpAdapter implements ExecutionAdapter {
   async runChat(input: AdapterInput): Promise<AdapterResult> {
     const directoryQuery = `?directory=${encodeURIComponent(input.workspaceRoot)}`
 
+    if (input.payload.openrouter_api_key) {
+      await ensureOpenRouterApiKey(this.baseUrl, input.workspaceRoot, input.payload.openrouter_api_key)
+    }
+
     const createSession = await fetch(`${this.baseUrl}/session${directoryQuery}`, {
       method: "POST",
       headers: buildBridgeHeaders(input.payload.openrouter_api_key),
@@ -73,7 +77,13 @@ export class OpenCodeHttpAdapter implements ExecutionAdapter {
       },
     )
 
-    const body = await safeJson(promptReq)
+    const rawText = await safeText(promptReq)
+    let body: unknown
+    try {
+      body = JSON.parse(rawText)
+    } catch {
+      body = { message: "non-json response", raw: rawText.slice(0, 200) }
+    }
     if (!promptReq.ok) {
       return {
         success: false,
@@ -91,6 +101,26 @@ export class OpenCodeHttpAdapter implements ExecutionAdapter {
       .map((p: any) => p.text as string)
       .join("\n")
       .trim()
+
+    const assistantErrorMessage = extractAssistantError(body)
+    if (!responseText && assistantErrorMessage) {
+      return {
+        success: false,
+        response: "",
+        model: input.payload.model_backend ?? "opencode-default",
+        mode: "error",
+        workflow_mode: input.payload.workflow_mode ?? "lightning",
+        task_id: input.taskId,
+        run_id: input.runId,
+        session_id: sessionId,
+        error: assistantErrorMessage,
+        used_tools: [],
+        created_paths: [],
+        updated_paths: [],
+        patch_summaries: [],
+        tool_calls: [],
+      }
+    }
 
     const result: AdapterResult = {
       success: true,
@@ -150,6 +180,70 @@ async function safeJson(response: Response): Promise<unknown> {
   } catch {
     return { message: "non-json response" }
   }
+}
+
+async function safeText(response: Response): Promise<string> {
+  try {
+    return await response.text()
+  } catch {
+    return ""
+  }
+}
+
+async function ensureOpenRouterApiKey(baseUrl: string, workspaceRoot: string, apiKey: string): Promise<void> {
+  const query = `?directory=${encodeURIComponent(workspaceRoot)}`
+  const configRes = await fetch(`${baseUrl}/config${query}`)
+  if (!configRes.ok) return
+
+  const current = await safeJson(configRes)
+  if (!isRecord(current)) return
+
+  const provider = isRecord(current.provider) ? current.provider : null
+  const openrouter = provider && isRecord(provider.openrouter) ? provider.openrouter : null
+  const options = openrouter && isRecord(openrouter.options) ? openrouter.options : null
+
+  const existingKey = options?.apiKey
+  if (typeof existingKey === "string" && existingKey === apiKey) return
+
+  const nextConfig = {
+    ...current,
+    provider: {
+      ...(provider ?? {}),
+      openrouter: {
+        ...(openrouter ?? {}),
+        options: {
+          ...(options ?? {}),
+          apiKey,
+        },
+      },
+    },
+  }
+
+  await fetch(`${baseUrl}/config${query}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(nextConfig),
+  })
+}
+
+function extractAssistantError(body: unknown): string | null {
+  const info = isRecord(body) && isRecord(body.info) ? body.info : null
+  const error = info && isRecord(info.error) ? info.error : null
+  const data = error && isRecord(error.data) ? error.data : null
+
+  if (data && typeof data.message === "string" && data.message.trim()) {
+    return data.message
+  }
+  if (error && typeof error.name === "string" && error.name.trim()) {
+    return error.name
+  }
+  return null
+}
+
+type UnknownRecord = Record<string, unknown>
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 export async function enforceExecutionIntegrity(result: AdapterResult, workspaceRoot: string): Promise<void> {

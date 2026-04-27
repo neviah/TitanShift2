@@ -26,8 +26,20 @@ if not exist "%~dp0opencode-upstream\node_modules" (
 	)
 )
 
+set "OPENROUTER_API_KEY="
+set "TS_STATE_FILE=%~dp0.titanshift\scheduler-state.json"
+if exist "%TS_STATE_FILE%" (
+	for /f "usebackq delims=" %%K in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%TS_STATE_FILE%'; try { $json = Get-Content -Raw $p | ConvertFrom-Json; $k = $json.settings.provider_openrouter_api_key; if($k){$k}else{''} } catch { '' }"`) do set "OPENROUTER_API_KEY=%%K"
+)
+
 echo [2/5] Starting OpenCode upstream on port 4096...
-start "OpenCode Upstream" cmd /k "cd /d ""%~dp0opencode-upstream"" && bun run --cwd packages/opencode --conditions=browser src/index.ts serve --port 4096"
+if defined OPENROUTER_API_KEY (
+	echo OpenRouter key loaded from scheduler state.
+	start "OpenCode Upstream" cmd /k "cd /d ""%~dp0opencode-upstream"" && set OPENROUTER_API_KEY=%OPENROUTER_API_KEY% && bun run --cwd packages/opencode --conditions=browser src/index.ts serve --port 4096"
+) else (
+	echo [WARN] No OpenRouter key found in scheduler state; OpenCode may fail provider auth.
+	start "OpenCode Upstream" cmd /k "cd /d ""%~dp0opencode-upstream"" && bun run --cwd packages/opencode --conditions=browser src/index.ts serve --port 4096"
+)
 
 echo Waiting for OpenCode health endpoint...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(45); $ok=$false; while((Get-Date)-lt $deadline){ try { $r=Invoke-WebRequest -Uri 'http://127.0.0.1:4096/health' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -ge 200){ $ok=$true; break } } catch {}; Start-Sleep -Milliseconds 700 }; if($ok){ exit 0 } else { exit 1 }"
