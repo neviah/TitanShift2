@@ -204,3 +204,18 @@ export function runSchedulerTaskStack(jobId: string): Promise<{ run_id: string; 
 export function triggerSchedulerTick(): Promise<SchedulerTickResponse> {
   return request("/scheduler/tick", { method: "POST", body: JSON.stringify({}) })
 }
+
+export function fetchHealthStatus(): Promise<{
+  ok: boolean
+  root: string
+  services: { bridge: boolean; opencode: boolean; openrouter_configured: boolean }
+}> {
+  return request("/health")
+}
+
+export function checkOpenRouterKey(apiKey?: string): Promise<{ ok: boolean; error?: string }> {
+  return request("/health/check-openrouter", {
+    method: "POST",
+    body: JSON.stringify(apiKey ? { api_key: apiKey } : {}),
+  })
+}

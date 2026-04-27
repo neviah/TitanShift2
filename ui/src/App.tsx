@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 import {
   cancelTask,
+  checkOpenRouterKey,
   createSchedulerJob,
   createSchedulerTaskStack,
   createSchedulerTemplateJob,
@@ -10,6 +11,7 @@ import {
   deleteSchedulerTemplateJob,
   fetchConfig,
   fetchConfigProviders,
+  fetchHealthStatus,
   fetchRun,
   fetchRuns,
   fetchSchedulerJobs,
@@ -76,6 +78,11 @@ export function App() {
   const [workspaceHistory, setWorkspaceHistory] = useState<string[]>([])
   const [apiKeyTestStatus, setApiKeyTestStatus] = useState<"idle" | "testing" | "success" | "failed">("idle")
   const [apiKeyTestMessage, setApiKeyTestMessage] = useState("")
+  const [healthStatus, setHealthStatus] = useState<{
+    bridge: boolean
+    opencode: boolean
+    openrouter_configured: boolean
+  } | null>(null)
   const chatThreadRef = useRef<HTMLDivElement | null>(null)
   const schedulerRuns = runs.filter((run) => run.description.startsWith("Scheduler:"))
   const latestSchedulerFailure = schedulerRuns.find((run) => run.status === "failed")
@@ -93,6 +100,21 @@ export function App() {
       }
     }
     void refreshAll()
+  }, [])
+
+  // Poll health status every 10s
+  useEffect(() => {
+    async function pollHealth() {
+      try {
+        const h = await fetchHealthStatus()
+        setHealthStatus(h.services)
+      } catch {
+        setHealthStatus({ bridge: false, opencode: false, openrouter_configured: false })
+      }
+    }
+    void pollHealth()
+    const interval = setInterval(() => { void pollHealth() }, 10000)
+    return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
@@ -267,27 +289,18 @@ export function App() {
     setApiKeyTestMessage("Testing connection...")
 
     try {
-      // Simple test: try a minimal API call to OpenRouter
-      const response = await fetch("https://openrouter.ai/api/v1/models", {
-        headers: {
-          Authorization: `Bearer ${providerApiKey}`,
-        },
-      })
-
-      if (response.ok) {
+      const result = await checkOpenRouterKey(providerApiKey)
+      if (result.ok) {
         setApiKeyTestStatus("success")
-        setApiKeyTestMessage("API key is valid! ✓")
+        setApiKeyTestMessage("API key is valid ✓")
         setTimeout(() => setApiKeyTestStatus("idle"), 3000)
-      } else if (response.status === 401) {
-        setApiKeyTestStatus("failed")
-        setApiKeyTestMessage("Invalid API key (401 Unauthorized)")
       } else {
         setApiKeyTestStatus("failed")
-        setApiKeyTestMessage(`Error: ${response.status} ${response.statusText}`)
+        setApiKeyTestMessage(result.error ?? "Invalid API key")
       }
-    } catch (error) {
+    } catch {
       setApiKeyTestStatus("failed")
-      setApiKeyTestMessage("Network error - cannot reach OpenRouter")
+      setApiKeyTestMessage("Connection error — check bridge is running")
     }
   }
 
@@ -340,6 +353,16 @@ export function App() {
             <div className="panel-status">
               <span className="badge status-running">workspace</span>
               <span className="muted panel-status-text">{workspaceRoot || "No workspace selected"}</span>
+              {healthStatus && (
+                <div className="connection-status-row">
+                  <span className={`conn-dot ${healthStatus.bridge ? "conn-ok" : "conn-fail"}`} title="Bridge" />
+                  <span className="conn-label">Bridge</span>
+                  <span className={`conn-dot ${healthStatus.opencode ? "conn-ok" : "conn-fail"}`} title="OpenCode" />
+                  <span className="conn-label">OpenCode</span>
+                  <span className={`conn-dot ${healthStatus.openrouter_configured ? "conn-ok" : "conn-warn"}`} title="OpenRouter" />
+                  <span className="conn-label">OpenRouter</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join, resolve } from "node:path"
 import { z } from "zod"
 import { OpenCodeHttpAdapter } from "./adapters/opencodeAdapter.js"
+import { OpenRouterDirectAdapter, checkOpenRouterConnectivity } from "./adapters/openrouterAdapter.js"
 import { TaskStore } from "./store/taskStore.js"
 import { SchedulerStore } from "./store/schedulerStore.js"
 import type {
@@ -108,7 +109,32 @@ export function buildServer() {
 
   const adapter = new OpenCodeHttpAdapter(process.env.OPENCODE_BASE_URL ?? "http://127.0.0.1:4096")
 
-  app.get("/health", async () => ({ ok: true, root: activeWorkspaceRoot }))
+  app.get("/health", async () => {
+    // Probe OpenCode connectivity (non-blocking, 2s timeout)
+    let opencodeOk = false
+    try {
+      const probe = await Promise.race([
+        fetch(`${process.env.OPENCODE_BASE_URL ?? "http://127.0.0.1:4096"}/health`),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
+      ])
+      opencodeOk = (probe as Response).ok
+    } catch {
+      opencodeOk = false
+    }
+
+    const hasOpenRouterKey = Boolean(settings.provider_openrouter_api_key)
+    const backendIsOpenRouter = settings.model_default_backend.toLowerCase().includes("openrouter")
+
+    return {
+      ok: true,
+      root: activeWorkspaceRoot,
+      services: {
+        bridge: true,
+        opencode: opencodeOk,
+        openrouter_configured: backendIsOpenRouter && hasOpenRouterKey,
+      },
+    }
+  })
 
   app.post("/chat", async (req, reply) => {
     const parsed = ChatRequestSchema.safeParse(req.body)
@@ -216,20 +242,46 @@ export function buildServer() {
     streamEvent({ type: "start", task_id: taskId, run_id: runId, workflow_mode: payload.workflow_mode ?? "lightning" })
 
     try {
-      const result = await withTimeout(
-        adapter.runChat({
-          taskId,
-          runId,
-          workspaceRoot: activeWorkspaceRoot,
-          payload,
-        }),
-        payload.budget?.max_duration_ms,
-      )
+      let result: {
+        success: boolean
+        response: string
+        model: string
+        mode: string
+        workflow_mode?: string | null
+        error?: string | null
+        session_id?: string
+        used_tools?: unknown[]
+        created_paths?: unknown[]
+        updated_paths?: unknown[]
+        patch_summaries?: unknown[]
+      }
+
+      if (isOpenRouterDirect(payload)) {
+        // Direct OpenRouter path — no OpenCode dependency
+        const orAdapter = buildOpenRouterAdapter(payload)
+        result = await orAdapter.streamChat(payload.prompt, (chunk) => {
+          streamEvent({ type: "text_delta", delta: chunk })
+        })
+      } else {
+        result = await withTimeout(
+          adapter.runChat({
+            taskId,
+            runId,
+            workspaceRoot: activeWorkspaceRoot,
+            payload,
+          }),
+          payload.budget?.max_duration_ms,
+        )
+
+        if (result.response) {
+          streamEvent({ type: "text_delta", text: result.response })
+        }
+      }
 
       taskStore.updateStatus(taskId, "completed", {
         completed_at: new Date().toISOString(),
         success: result.success,
-        error: result.error,
+        error: result.error ?? null,
         output: {
           ...result,
           session_id: result.session_id,
@@ -237,17 +289,13 @@ export function buildServer() {
         },
       })
 
-      if (result.response) {
-        streamEvent({ type: "text_delta", text: result.response })
-      }
-
       streamEvent({
         type: "done",
         success: result.success,
         response: result.response,
         model: result.model,
         mode: result.mode,
-        workflow_mode: result.workflow_mode,
+        workflow_mode: result.workflow_mode ?? "lightning",
         used_tools: result.used_tools ?? [],
         created_paths: result.created_paths ?? [],
         updated_paths: result.updated_paths ?? [],
@@ -332,6 +380,12 @@ export function buildServer() {
   app.get("/config/providers", async () => {
     const response = await adapter.fetchConfigProviders(activeWorkspaceRoot)
     return response
+  })
+
+  app.post<{ Body: { api_key?: string } }>("/health/check-openrouter", async (req) => {
+    const key = typeof req.body?.api_key === "string" ? req.body.api_key : settings.provider_openrouter_api_key
+    const result = await checkOpenRouterConnectivity(key)
+    return result
   })
 
   app.post("/config", async (req, reply) => {
@@ -734,8 +788,21 @@ export function buildServer() {
     return {
       ...payload,
       model_backend: modelBackend,
+      provider_model: payload.provider_model ?? settings.provider_default_model,
       openrouter_api_key: includeOpenRouterKey ? settings.provider_openrouter_api_key : undefined,
     }
+  }
+
+  function isOpenRouterDirect(payload: ChatRequest): boolean {
+    const backend = (payload.model_backend ?? "").toLowerCase()
+    return backend.includes("openrouter") && Boolean(payload.openrouter_api_key)
+  }
+
+  function buildOpenRouterAdapter(payload: ChatRequest): OpenRouterDirectAdapter {
+    const model = payload.provider_model && payload.provider_model !== "opencode/default"
+      ? payload.provider_model
+      : settings.provider_default_model
+    return new OpenRouterDirectAdapter(payload.openrouter_api_key!, model)
   }
 
   async function executeChatTask(payload: ChatRequest) {

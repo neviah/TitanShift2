@@ -9,6 +9,7 @@ export type ChatRequest = {
   prompt: string
   history?: ChatHistoryMessage[]
   model_backend?: string
+  provider_model?: string
   workflow_mode?: WorkflowMode
   openrouter_api_key?: string
   spec_approved?: boolean
